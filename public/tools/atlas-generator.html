@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Readback — Glyph Atlas Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=block" rel="stylesheet" />
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; }
+  .row { display: flex; gap: 0.75rem; align-items: center; margin: 0.75rem 0; flex-wrap: wrap; }
+  button, input[type="file"], input[type="number"] { font: inherit; }
+  button { padding: 0.5rem 1.25rem; border-radius: 6px; border: 1px solid #38bdf8; background: #38bdf8; color: #0f172a; cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: transparent; color: #38bdf8; }
+  label { font-size: 0.85rem; color: #94a3b8; }
+  input[type="number"] { width: 4rem; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 0.25rem 0.4rem; }
+  #preview { border: 1px solid #334155; margin-top: 1rem; image-rendering: pixelated; max-width: 100%; }
+  pre { background: #1e293b; padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.75rem; }
+  .status { font-size: 0.85rem; color: #94a3b8; }
+  .instructions { font-size: 0.85rem; color: #94a3b8; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>Readback — Glyph Atlas Generator</h1>
+  <p class="instructions">
+    Renders the 95 printable ASCII characters (0x20&ndash;0x7E) in JetBrains Mono into a sprite
+    sheet + manifest for the glyph-matching pipeline. Uses JetBrains Mono Regular from Google
+    Fonts by default; use "Load local font file" to render from your own .ttf/.otf instead if
+    you want a pixel-exact match to what's installed on your machine. This is a dev-time tool —
+    its output (atlas.png + atlas-manifest.json) gets placed under <code>public/atlas/</code> in
+    the project.
+  </p>
+
+  <div class="row">
+    <label>Cell size:
+      <input type="number" id="cellWidth" value="40" /> x
+      <input type="number" id="cellHeight" value="64" />
+    </label>
+    <label>Font px size:
+      <input type="number" id="fontSize" value="48" />
+    </label>
+  </div>
+
+  <div class="row">
+    <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" />
+    <span class="status" id="fontStatus">Using JetBrains Mono Regular (Google Fonts)</span>
+  </div>
+
+  <div class="row">
+    <button id="generateBtn">Generate Atlas</button>
+    <button id="downloadPngBtn" class="secondary" disabled>Download atlas.png</button>
+    <button id="downloadJsonBtn" class="secondary" disabled>Download atlas-manifest.json</button>
+  </div>
+
+  <canvas id="preview"></canvas>
+
+  <script>
+    const CHARS = [];
+    for (let code = 0x20; code <= 0x7e; code++) CHARS.push(String.fromCharCode(code));
+
+    const COLS = 10;
+    const FONT_FAMILY_LOADED = "JetBrainsMonoLocal";
+    let activeFontFamily = "'JetBrains Mono', monospace";
+    let manifest = null;
+    let pngBlob = null;
+
+    const canvas = document.getElementById("preview");
+    const ctx = canvas.getContext("2d");
+
+    document.getElementById("fontFile").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const buf = await file.arrayBuffer();
+      const face = new FontFace(FONT_FAMILY_LOADED, buf);
+      await face.load();
+      document.fonts.add(face);
+      activeFontFamily = `'${FONT_FAMILY_LOADED}', monospace`;
+      document.getElementById("fontStatus").textContent = `Using local file: ${file.name}`;
+    });
+
+    document.getElementById("generateBtn").addEventListener("click", async () => {
+      await document.fonts.load(`16px 'JetBrains Mono'`);
+      await document.fonts.ready;
+      generateAtlas();
+    });
+
+    function generateAtlas() {
+      const cellWidth = parseInt(document.getElementById("cellWidth").value, 10);
+      const cellHeight = parseInt(document.getElementById("cellHeight").value, 10);
+      const fontSize = parseInt(document.getElementById("fontSize").value, 10);
+      const rows = Math.ceil(CHARS.length / COLS);
+
+      canvas.width = cellWidth * COLS;
+      canvas.height = cellHeight * rows;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.font = `${fontSize}px ${activeFontFamily}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#000000";
+
+      const sprites = {};
+      CHARS.forEach((ch, i) => {
+        const col = i % COLS;
+        const row = Math.floor(i / COLS);
+        const cx = col * cellWidth + cellWidth / 2;
+        const cy = row * cellHeight + cellHeight / 2;
+        ctx.fillText(ch, cx, cy);
+        sprites[ch] = { x: col * cellWidth, y: row * cellHeight, w: cellWidth, h: cellHeight };
+      });
+
+      manifest = {
+        cellWidth,
+        cellHeight,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        fontSize,
+        sprites,
+      };
+
+      canvas.toBlob((blob) => {
+        pngBlob = blob;
+        document.getElementById("downloadPngBtn").disabled = false;
+        document.getElementById("downloadJsonBtn").disabled = false;
+      }, "image/png");
+    }
+
+    document.getElementById("downloadPngBtn").addEventListener("click", () => {
+      if (!pngBlob) return;
+      const url = URL.createObjectURL(pngBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "atlas.png";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("downloadJsonBtn").addEventListener("click", () => {
+      if (!manifest) return;
+      const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "atlas-manifest.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

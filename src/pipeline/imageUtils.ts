@@ -1,0 +1,142 @@
+export function luminance(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** Mean luminance of row `y`, restricted to [xStart, xEnd). */
+export function rowLuminance(data: ImageData, y: number, xStart = 0, xEnd = data.width): number {
+  let sum = 0;
+  const count = xEnd - xStart;
+  for (let x = xStart; x < xEnd; x++) {
+    const i = (y * data.width + x) * 4;
+    sum += luminance(data.data[i], data.data[i + 1], data.data[i + 2]);
+  }
+  return sum / count;
+}
+
+/** Mean luminance of column `x`, restricted to [yStart, yEnd). */
+export function colLuminance(data: ImageData, x: number, yStart = 0, yEnd = data.height): number {
+  let sum = 0;
+  const count = yEnd - yStart;
+  for (let y = yStart; y < yEnd; y++) {
+    const i = (y * data.width + x) * 4;
+    sum += luminance(data.data[i], data.data[i + 1], data.data[i + 2]);
+  }
+  return sum / count;
+}
+
+/** Returns the [start, end) index ranges of contiguous `true` runs in `mask`. */
+export function findRuns(mask: boolean[]): Array<{ start: number; end: number }> {
+  const runs: Array<{ start: number; end: number }> = [];
+  let runStart = -1;
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i] && runStart === -1) {
+      runStart = i;
+    } else if (!mask[i] && runStart !== -1) {
+      runs.push({ start: runStart, end: i });
+      runStart = -1;
+    }
+  }
+  if (runStart !== -1) {
+    runs.push({ start: runStart, end: mask.length });
+  }
+  return runs;
+}
+
+/** Otsu's method: finds the luminance threshold that best separates `values` into two classes. */
+export function otsuThreshold(values: number[]): number {
+  const histogram = new Array(256).fill(0);
+  for (const v of values) {
+    histogram[Math.max(0, Math.min(255, Math.round(v)))]++;
+  }
+
+  const total = values.length;
+  let sumAll = 0;
+  for (let t = 0; t < 256; t++) sumAll += t * histogram[t];
+
+  let sumBackground = 0;
+  let weightBackground = 0;
+  let maxVariance = -1;
+  let threshold = 127;
+
+  for (let t = 0; t < 256; t++) {
+    weightBackground += histogram[t];
+    if (weightBackground === 0) continue;
+
+    const weightForeground = total - weightBackground;
+    if (weightForeground === 0) break;
+
+    sumBackground += t * histogram[t];
+
+    const meanBackground = sumBackground / weightBackground;
+    const meanForeground = (sumAll - sumBackground) / weightForeground;
+
+    const betweenVariance =
+      weightBackground * weightForeground * (meanBackground - meanForeground) ** 2;
+
+    if (betweenVariance > maxVariance) {
+      maxVariance = betweenVariance;
+      threshold = t;
+    }
+  }
+
+  return threshold;
+}
+
+/** Bilinear sample of a single-channel grayscale buffer, clamping out-of-bounds reads to white. */
+export function bilinearGraySample(gray: Float32Array, width: number, height: number, x: number, y: number): number {
+  if (x < 0 || y < 0 || x >= width || y >= height) return 255;
+
+  const x0 = Math.floor(x - 0.5);
+  const y0 = Math.floor(y - 0.5);
+  const fx = x - 0.5 - x0;
+  const fy = y - 0.5 - y0;
+
+  const cx0 = Math.max(0, Math.min(width - 1, x0));
+  const cx1 = Math.max(0, Math.min(width - 1, x0 + 1));
+  const cy0 = Math.max(0, Math.min(height - 1, y0));
+  const cy1 = Math.max(0, Math.min(height - 1, y0 + 1));
+
+  const p00 = gray[cy0 * width + cx0];
+  const p10 = gray[cy0 * width + cx1];
+  const p01 = gray[cy1 * width + cx0];
+  const p11 = gray[cy1 * width + cx1];
+
+  const top = p00 * (1 - fx) + p10 * fx;
+  const bottom = p01 * (1 - fx) + p11 * fx;
+  return top * (1 - fy) + bottom * fy;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Crops `rect` out of `image` and resamples it (grayscale, bilinear) to destWidth x destHeight. */
+export function resampleToGray(image: ImageData, rect: Rect, destWidth: number, destHeight: number): Float32Array {
+  const srcGray = new Float32Array(rect.w * rect.h);
+  for (let y = 0; y < rect.h; y++) {
+    for (let x = 0; x < rect.w; x++) {
+      const i = ((rect.y + y) * image.width + (rect.x + x)) * 4;
+      srcGray[y * rect.w + x] = luminance(image.data[i], image.data[i + 1], image.data[i + 2]);
+    }
+  }
+
+  const dest = new Float32Array(destWidth * destHeight);
+  for (let dy = 0; dy < destHeight; dy++) {
+    for (let dx = 0; dx < destWidth; dx++) {
+      const sx = ((dx + 0.5) * rect.w) / destWidth;
+      const sy = ((dy + 0.5) * rect.h) / destHeight;
+      dest[dy * destWidth + dx] = bilinearGraySample(srcGray, rect.w, rect.h, sx, sy);
+    }
+  }
+  return dest;
+}
+
+export function median(values: number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
