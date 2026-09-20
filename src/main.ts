@@ -1,5 +1,7 @@
 import "./style.css";
 import { CaptureController } from "./capture/CaptureController";
+import { setupUpdatePrompt } from "./updatePrompt";
+import { VERSION_LABEL } from "./version";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -27,7 +29,11 @@ function showStartScreen(message?: string) {
   button.textContent = message ? "Try again" : "Start camera";
   button.addEventListener("click", () => start());
 
-  panel.append(title, hint, button);
+  const version = document.createElement("p");
+  version.className = "version-badge";
+  version.textContent = VERSION_LABEL;
+
+  panel.append(title, hint, button, version);
   app.appendChild(panel);
 }
 
@@ -61,4 +67,5 @@ function describeCameraError(err: Error): string {
   }
 }
 
+setupUpdatePrompt();
 showStartScreen();
