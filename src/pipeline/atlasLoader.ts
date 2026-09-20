@@ -6,7 +6,7 @@ import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "./
  * throwing) if the assets aren't present yet, since the atlas is a manual, one-time
  * dev-time artifact the app should degrade gracefully without.
  */
-export async function loadAtlasAssets(baseUrl = "/atlas"): Promise<GlyphAtlas | null> {
+export async function loadAtlasAssets(baseUrl = `${import.meta.env.BASE_URL}atlas`): Promise<GlyphAtlas | null> {
   try {
     const manifestRes = await fetch(`${baseUrl}/atlas-manifest.json`);
     if (!manifestRes.ok) return null;
