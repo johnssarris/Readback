@@ -199,3 +199,53 @@ html, body {
   padding: 0;
   font-size: 0.95rem;
 }
+
+.version-badge {
+  margin: 1rem 0 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+
+.update-toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid #334155;
+  background: #1e293b;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  font-size: 0.9rem;
+}
+
+.update-toast button {
+  flex: none;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.update-toast-accept {
+  border: none;
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.update-toast-accept:disabled {
+  opacity: 0.6;
+}
+
+.update-toast-dismiss {
+  border: 1px solid #475569;
+  background: transparent;
+  color: #cbd5e1;
+}

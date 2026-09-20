@@ -34,6 +34,18 @@ Project Pages serve from a subdirectory, so `vite.config.ts` sets
 If permission was denied by accident, reset it from **aA** in the Safari address
 bar → **Website Settings → Camera → Allow**.
 
+## Versions and updates
+
+The build stamps the short commit and build date into the bundle, and the start
+screen shows them (`2026-09-20 · 6996d3e`) — so a phone can say exactly which
+deploy it is running.
+
+The service worker registers in **prompt** mode. A new deploy is fetched in the
+background, then the app offers an **Update** toast rather than swapping itself
+out mid-capture; **Later** keeps the current version until the next reload. A
+running app re-checks for a new deploy hourly and whenever it returns to the
+foreground, which matters for a home-screen install that is never really closed.
+
 ## Development
 
 ```sh
