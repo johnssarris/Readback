@@ -4,6 +4,8 @@ import type { MarginBounds } from "./margins";
 export interface CellPitch {
   widthPx: number;
   heightPx: number;
+  /** Left edge of the first character cell, in full rectified-image coordinates. */
+  columnOriginX: number;
   /** Vertical center (in full rectified-image coordinates) of each displayed row's line box. */
   rowYCenters: number[];
   /**
@@ -30,6 +32,12 @@ const WIDTH_FINE_STEP = 0.005;
 
 /** How far either side of the coarse width the sharper measure looks. */
 const WIDTH_POLISH = 0.04;
+
+/** Step (px) of the continuous sweep for the phase of a cell boundary. */
+const PHASE_STEP = 0.1;
+
+/** Width of the band read at each boundary, as a share of the cell. */
+const BOUNDARY_BAND = 0.12;
 
 /** Phase bins used to score a candidate width. */
 const PHASE_BINS = 12;
@@ -100,15 +108,42 @@ export function calibrateCellPitch(image: ImageData, margins: MarginBounds): Cel
   const gutter = analyzeGutter(image, margins);
   const rows = detectRows(image, margins, gutter);
 
-  const widthPx =
-    estimateWidthFromText(image, margins, rows.pitch) ?? gutter.widthFromDigits(rows.pitch * ASSUMED_ASPECT_RATIO);
+  const columns = fitColumns(image, margins, rows.pitch);
+  const widthPx = columns?.width ?? gutter.widthFromDigits(rows.pitch * ASSUMED_ASPECT_RATIO);
+
+  // Where the gutter's background ends is the editor's left margin, which is
+  // where the first cell starts only if the theme adds no padding there. The
+  // text's own boundaries say where the cells really are; the margin is only
+  // consulted when there is not enough text to ask.
+  const columnOriginX = columns
+    ? firstColumnOrigin(columns.originX, widthPx, margins.textAreaLeftX)
+    : margins.textAreaLeftX;
 
   return {
     widthPx,
     heightPx: rows.pitch,
+    columnOriginX,
     rowYCenters: rows.centers,
     rowBaselines: rows.baselines,
   };
+
+}
+
+/**
+ * Picks the cell boundary the first column starts at.
+ *
+ * The boundaries repeat every cell, so any one of them describes the same grid.
+ * Which one is column zero is decided by the editor's left margin: the first
+ * boundary at or after it. Taking the nearest one instead would put a boundary
+ * inside the margin's padding whenever that padding is more than half a cell,
+ * and every line would come back with a blank column in front of it.
+ *
+ * The margin itself is measured, so a boundary a hair to the left of it is the
+ * same boundary; the width of a gap between characters is the natural slack.
+ */
+function firstColumnOrigin(originX: number, width: number, marginX: number): number {
+  const steps = Math.ceil((marginX - width * BOUNDARY_BAND - originX) / width);
+  return originX + steps * width;
 }
 
 /**
@@ -188,7 +223,7 @@ function rowPitch(profile: number[], lineSpacing: number): number {
   for (let pitch = coarse * (1 - PITCH_POLISH); pitch <= coarse * (1 + PITCH_POLISH); pitch += ROW_PITCH_STEP) {
     // Same pairing as the cell width: the spread of the ink keeps the answer on
     // the right pitch, the gap between rows sharpens it.
-    const score = gapDepth(profile, pitch) * periodicityScore(profile, pitch);
+    const score = emptiestPhase(profile, pitch).depth * periodicityScore(profile, pitch);
     if (score > refinedScore) {
       refinedScore = score;
       refined = pitch;
@@ -356,8 +391,8 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
 }
 
 /**
- * Measures the advance width from the text itself, by finding the column
- * spacing the text area is actually periodic at.
+ * Measures the character grid from the text itself: how wide a cell is, and
+ * where the boundary between one cell and the next falls.
  *
  * The gutter can only offer the width of a digit's ink, which is narrower than
  * the cell that holds it by both side bearings - a systematic underestimate that
@@ -365,7 +400,7 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
  * characters laid out on the real grid, and the spacing that grid repeats at is
  * the advance width, whatever the ink inside each cell happens to look like.
  */
-function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeightPx: number): number | null {
+function fitColumns(image: ImageData, margins: MarginBounds, cellHeightPx: number): GridFit | null {
   if (!Number.isFinite(cellHeightPx) || cellHeightPx <= 0) return null;
 
   const x0 = Math.max(0, Math.round(margins.textAreaLeftX));
@@ -380,16 +415,16 @@ function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeig
   const minWidth = cellHeightPx * MIN_ADVANCE_RATIO;
   const maxWidth = cellHeightPx * MAX_ADVANCE_RATIO;
 
-  let bestWidth = null;
-  let bestScore = -Infinity;
+  let coarse = null;
+  let coarseScore = -Infinity;
   for (let width = minWidth; width <= maxWidth; width += WIDTH_COARSE_STEP) {
     const score = periodicityScore(profile, width);
-    if (score > bestScore) {
-      bestScore = score;
-      bestWidth = width;
+    if (score > coarseScore) {
+      coarseScore = score;
+      coarse = width;
     }
   }
-  if (bestWidth === null) return null;
+  if (coarse === null) return null;
 
   // Sharpen it, now also on the gaps between characters. Which spacing the text
   // repeats at is a coarse question and the spread of the ink answers it; how
@@ -398,16 +433,81 @@ function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeig
   // shows first - they fill in as soon as the grid starts sliding off the
   // characters - while the spread keeps the answer anchored to the right
   // spacing rather than a slightly better-looking neighbour.
-  let refined = bestWidth;
-  let refinedScore = -Infinity;
-  for (let width = bestWidth * (1 - WIDTH_POLISH); width <= bestWidth * (1 + WIDTH_POLISH); width += WIDTH_FINE_STEP) {
-    const score = gapDepth(profile, width) * periodicityScore(profile, width);
-    if (score > refinedScore) {
-      refinedScore = score;
-      refined = width;
+  //
+  // The phase that empties the gaps is the grid's own origin, so it comes back
+  // with the width rather than being assumed from the margin.
+  let best: GridFit | null = null;
+  let bestScore = -Infinity;
+  for (let width = coarse * (1 - WIDTH_POLISH); width <= coarse * (1 + WIDTH_POLISH); width += WIDTH_FINE_STEP) {
+    const gap = emptiestPhase(profile, width);
+    const score = gap.depth * periodicityScore(profile, width);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { width, originX: x0 + gap.phase };
     }
   }
-  return refined;
+  return best;
+}
+
+interface GridFit {
+  width: number;
+  originX: number;
+}
+
+/**
+ * The phase within a cell where the text has least ink, and how empty it is.
+ *
+ * At the right width and phase every cell boundary lands in the gap between two
+ * characters, and that phase comes out close to empty. A width that is slightly
+ * wrong slides the boundary onto the characters a little more with every
+ * column, and the gap fills in - which makes this a much sharper measure of a
+ * small error than the overall spread of the ink, and it names the boundary
+ * outright.
+ *
+ * The phase is swept continuously rather than binned, because the boundary is
+ * wanted to a fraction of a pixel: a bin wide enough to hold a useful number of
+ * columns is a tenth of a cell, and a tenth of a cell is the difference between
+ * a template landing on a glyph and landing between two.
+ */
+function emptiestPhase(profile: number[], width: number): { phase: number; depth: number } {
+  let total = 0;
+  for (const value of profile) total += value;
+  if (total === 0) return { phase: 0, depth: 0 };
+  const mean = total / profile.length;
+
+  // Each boundary is read as a narrow band rather than a single line of pixels:
+  // one line is a sample of one, and noise in it moves the answer.
+  const half = (width * BOUNDARY_BAND) / 2;
+
+  let bestPhase = 0;
+  let leastInk = Infinity;
+  for (let phase = 0; phase < width; phase += PHASE_STEP) {
+    let ink = 0;
+    let samples = 0;
+    for (let x = phase; x < profile.length; x += width) {
+      for (let dx = -half; dx <= half; dx += PHASE_STEP) {
+        ink += sampleAt(profile, x + dx);
+        samples++;
+      }
+    }
+    if (samples === 0) continue;
+    const perBoundary = ink / samples;
+    if (perBoundary < leastInk) {
+      leastInk = perBoundary;
+      bestPhase = phase;
+    }
+  }
+
+  return { phase: bestPhase, depth: Math.max(0, (mean - leastInk) / mean) };
+}
+
+/** The profile at a fractional position, between its two neighbouring columns. */
+function sampleAt(profile: number[], x: number): number {
+  const i = Math.floor(x);
+  if (i < 0 || i >= profile.length) return 0;
+  if (i + 1 >= profile.length) return profile[i];
+  const f = x - i;
+  return profile[i] * (1 - f) + profile[i + 1] * f;
 }
 
 /** Foreground pixel count per column, thresholded over the region as a whole. */
@@ -454,29 +554,6 @@ function periodicityScore(profile: number[], width: number): number {
   let variance = 0;
   for (const bin of bins) variance += (bin - mean) ** 2;
   return variance / (mean * mean);
-}
-
-/**
- * How empty the emptiest phase of a cell is, relative to the average.
- *
- * At the right width every cell boundary lands in the gap between characters,
- * and one phase comes out close to empty. A width that is slightly wrong slides
- * the boundary onto the characters a little more with every column, and the gap
- * fills in - which makes this a much sharper measure of a small error than the
- * overall spread of the ink.
- */
-function gapDepth(profile: number[], width: number): number {
-  const bins = new Array(PHASE_BINS).fill(0);
-  let total = 0;
-  for (let x = 0; x < profile.length; x++) {
-    const phase = ((x % width) + width) % width;
-    bins[Math.min(PHASE_BINS - 1, Math.floor((phase / width) * PHASE_BINS))] += profile[x];
-    total += profile[x];
-  }
-  if (total === 0) return 0;
-
-  const mean = total / PHASE_BINS;
-  return (mean - Math.min(...bins)) / mean;
 }
 
 interface GutterAnalysis {

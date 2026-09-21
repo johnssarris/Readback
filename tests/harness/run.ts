@@ -103,7 +103,7 @@ function score(
 
   const columns =
     Number.isFinite(pitch.widthPx) && pitch.widthPx > 0
-      ? Math.floor((margins.textAreaRightX - margins.textAreaLeftX) / pitch.widthPx)
+      ? Math.floor((margins.textAreaRightX - pitch.columnOriginX) / pitch.widthPx)
       : 0;
   const map = columns > 0 ? inkMap(rectified, margins, pitch, columns) : [];
 

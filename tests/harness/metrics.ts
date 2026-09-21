@@ -83,7 +83,7 @@ export function inkMap(
     const samples: number[] = [];
     for (let y = top; y < bottom; y++) {
       if (y < 0) continue;
-      for (let x = Math.round(margins.textAreaLeftX); x < Math.round(margins.textAreaRightX); x += 3) {
+      for (let x = Math.round(pitch.columnOriginX); x < Math.round(margins.textAreaRightX); x += 3) {
         const i = (y * image.width + x) * 4;
         samples.push(luminance(image.data[i], image.data[i + 1], image.data[i + 2]));
       }
@@ -94,8 +94,8 @@ export function inkMap(
 
     const row: boolean[] = [];
     for (let col = 0; col < columns; col++) {
-      const x0 = Math.round(margins.textAreaLeftX + col * pitch.widthPx);
-      const x1 = Math.round(margins.textAreaLeftX + (col + 1) * pitch.widthPx);
+      const x0 = Math.round(pitch.columnOriginX + col * pitch.widthPx);
+      const x1 = Math.round(pitch.columnOriginX + (col + 1) * pitch.widthPx);
       let darkest = 255;
       for (let y = top; y < bottom; y++) {
         if (y < 0) continue;

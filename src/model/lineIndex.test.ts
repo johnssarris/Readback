@@ -131,6 +131,7 @@ describe("buildRows + rowsToText", () => {
     const pitch: CellPitch = {
       widthPx: CELL,
       heightPx: CELL,
+      columnOriginX: 4,
       rowYCenters: [2, 6],
       rowBaselines: [4, 8], // cell bottom: these test glyphs fill their box
     };

@@ -177,8 +177,9 @@ function readLineNumber(
  * shift every cell in it against the templates by a different amount.
  */
 export function buildRows(image: ImageData, margins: MarginBounds, pitch: CellPitch, atlas: GlyphAtlas): LineRow[] {
-  const { textAreaLeftX, textAreaRightX } = margins;
-  const columnCount = Math.floor((textAreaRightX - textAreaLeftX) / pitch.widthPx);
+  const { textAreaRightX } = margins;
+  const originX = pitch.columnOriginX;
+  const columnCount = Math.floor((textAreaRightX - originX) / pitch.widthPx);
   const ascent = (atlas.baselineFraction ?? DEFAULT_BASELINE_FRACTION) * pitch.heightPx;
 
   const rowTops = pitch.rowYCenters.map((yCenter, index) => {
@@ -202,7 +203,7 @@ export function buildRows(image: ImageData, margins: MarginBounds, pitch: CellPi
 
     const cells: CellResult[] = [];
     for (let col = 0; col < columnCount; col++) {
-      const rect = cellRect(textAreaLeftX + col * pitch.widthPx, rowTop, pitch, margins);
+      const rect = cellRect(originX + col * pitch.widthPx, rowTop, pitch, margins);
       cells.push(cellResultFromMatch(rect, matchCell(image, rect, atlas)));
     }
 
