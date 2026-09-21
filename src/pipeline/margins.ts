@@ -18,12 +18,12 @@ export const BOUNDARY_THRESHOLD = 12;
  * Text is a minority of any line it sits on, so reading above it — at the bright
  * end — gives the background the line is drawn on, and ink stops registering as
  * a boundary at all. It has to clear the ink but stay below any specular
- * highlight, and 0.75 leaves room on both sides: a column needs only a quarter
- * of its pixels to be background to read as background, which every column of a
- * line-number gutter has (digits are shorter than the line box, and not every
- * line's number reaches every column).
+ * highlight. A quarter of the way down was not enough: a line of dense
+ * punctuation running the full width of a maximised window inks more than a
+ * quarter of its own row, and reading into that ink put the top of the body ten
+ * rows below where it belongs.
  */
-const PROFILE_PERCENTILE = 0.75;
+const PROFILE_PERCENTILE = 0.9;
 
 /** Boundaries closer together than this (px) are treated as the same edge (anti-aliasing). */
 const MERGE_DISTANCE = 3;
@@ -61,6 +61,13 @@ export function detectMargins(image: ImageData): MarginBounds {
   const skipLeft = Math.round(width * EDGE_SKIP_FRACTION);
   const skipRight = width - Math.round(width * EDGE_SKIP_FRACTION);
 
+  // Anything before the skip is the window's own frame meeting the margin. A
+  // rectified capture carries a sliver of whatever was behind the screen along
+  // its edges, and that sliver is dark on every row - taken as part of the
+  // margin it reads as a line number on every row, including the wrapped ones
+  // that have none.
+  const gutterLeftX = [...colBoundaries].reverse().find((b) => b <= skipLeft) ?? 0;
+
   const gutterRightEdgeX = colBoundaries.find((b) => b > skipLeft) ?? Math.round(width * 0.08);
   const textAreaRightCandidate = [...colBoundaries].reverse().find((b) => b < skipRight && b > gutterRightEdgeX);
   const textAreaRightX = textAreaRightCandidate ?? width;
@@ -68,7 +75,7 @@ export function detectMargins(image: ImageData): MarginBounds {
   return {
     bodyTopY,
     bodyBottomY,
-    gutterLeftX: 0,
+    gutterLeftX,
     gutterRightEdgeX,
     textAreaLeftX: gutterRightEdgeX,
     textAreaRightX,

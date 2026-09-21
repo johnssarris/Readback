@@ -1,6 +1,7 @@
 import type { CellPitch } from "../pipeline/calibrate";
 import type { MarginBounds } from "../pipeline/margins";
-import { CONFIDENCE_FLOOR, matchCell, type GlyphAtlas } from "../pipeline/match";
+import { matchCell, type GlyphAtlas } from "../pipeline/match";
+import { readLineNumbers } from "../pipeline/lineNumbers";
 import type { Rect } from "../pipeline/imageUtils";
 
 export interface CellResult {
@@ -44,29 +45,6 @@ export interface Capture {
 /** Fallback share of the line box above the baseline, when the atlas doesn't say. */
 const DEFAULT_BASELINE_FRACTION = 0.8;
 
-/** Rows sampled when locating the line numbers' right edge. */
-const GUTTER_PROBE_ROWS = 6;
-
-const DIGITS = "0123456789";
-
-/**
- * The same atlas restricted to the characters a region can actually contain.
- *
- * The line number margin holds digits and nothing else, but matched against all
- * 95 glyphs a digit competes with its lookalikes - 0 against O, 1 against l, 5
- * against S - and the ambiguity rule then rejects a perfectly good reading as
- * too close to call. Against the ten characters that could really be there,
- * the question is only which digit.
- */
-function restrictAtlas(atlas: GlyphAtlas, chars: string): GlyphAtlas {
-  const glyphs = new Map<string, Float32Array>();
-  for (const char of chars) {
-    const glyph = atlas.glyphs.get(char);
-    if (glyph) glyphs.set(char, glyph);
-  }
-  return { ...atlas, glyphs };
-}
-
 /**
  * A cell's sampling box, kept inside the editor body.
  *
@@ -93,80 +71,6 @@ function cellResultFromMatch(rect: Rect, match: ReturnType<typeof matchCell>): C
 }
 
 /**
- * Finds the column the line numbers are right-aligned against.
- *
- * The margin's own right padding is a theme setting, so the last digit does not
- * end at the gutter's edge - it ends somewhere up to a cell short of it, and
- * reading from the edge samples the padding instead of the digit. Scoring each
- * candidate column by how confidently the cells it implies read as digits
- * measures that padding instead of assuming it.
- */
-function findNumberRightEdge(
-  image: ImageData,
-  margins: MarginBounds,
-  pitch: CellPitch,
-  digitAtlas: GlyphAtlas,
-  rowTops: number[]
-): number {
-  const probes = rowTops.slice(0, GUTTER_PROBE_ROWS);
-
-  let bestEdge = margins.gutterRightEdgeX;
-  let bestScore = -1;
-
-  for (let edge = margins.gutterRightEdgeX; edge > margins.gutterRightEdgeX - pitch.widthPx; edge--) {
-    let score = 0;
-    for (const top of probes) {
-      const match = matchCell(image, cellRect(edge - pitch.widthPx, top, pitch, margins), digitAtlas);
-      if (!match.flagged && match.char !== " ") score += match.confidence;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestEdge = edge;
-    }
-  }
-  return bestEdge;
-}
-
-/** Reads the right-aligned gutter digits for one row by matching cells backward from their right edge. */
-function readLineNumber(
-  image: ImageData,
-  margins: MarginBounds,
-  pitch: CellPitch,
-  digitAtlas: GlyphAtlas,
-  rowTop: number,
-  gutterRightEdgeX: number
-): { lineNumber: number; confidence: number; isWrappedContinuation: boolean } {
-  const { gutterLeftX } = margins;
-  const maxSlots = Math.max(0, Math.floor((gutterRightEdgeX - gutterLeftX) / pitch.widthPx));
-
-  const digits: string[] = [];
-  const confidences: number[] = [];
-
-  for (let k = 0; k < maxSlots; k++) {
-    const rect = cellRect(gutterRightEdgeX - (k + 1) * pitch.widthPx, rowTop, pitch, margins);
-    const match = matchCell(image, rect, digitAtlas);
-
-    // Ink decides whether this row has a number; which digit it is decides what
-    // the number says. Treating an ambiguous digit as no number at all is the
-    // worse error by far - it makes the row a continuation, and its whole line
-    // gets glued onto the one above. The ambiguity is recorded in the
-    // confidence instead.
-    if (match.char === " ") {
-      break;
-    }
-    digits.unshift(match.char);
-    confidences.unshift(match.flagged ? Math.min(match.confidence, CONFIDENCE_FLOOR) : match.confidence);
-  }
-
-  if (digits.length === 0) {
-    return { lineNumber: NaN, confidence: 0, isWrappedContinuation: true };
-  }
-
-  const confidence = confidences.reduce((a, b) => a + b, 0) / confidences.length;
-  return { lineNumber: parseInt(digits.join(""), 10), confidence, isWrappedContinuation: false };
-}
-
-/**
  * Assembles the full recognized `LineRow[]` for a captured, rectified screenful: reads each
  * row's real line number from the gutter, segments the text area into character cells at the
  * self-calibrated pitch, and matches every cell against the glyph atlas (Stages 4-6).
@@ -177,41 +81,38 @@ function readLineNumber(
  * shift every cell in it against the templates by a different amount.
  */
 export function buildRows(image: ImageData, margins: MarginBounds, pitch: CellPitch, atlas: GlyphAtlas): LineRow[] {
-  const { textAreaLeftX, textAreaRightX } = margins;
-  const columnCount = Math.floor((textAreaRightX - textAreaLeftX) / pitch.widthPx);
+  const { textAreaRightX } = margins;
+  const originX = pitch.columnOriginX;
+  const columnCount = Math.floor((textAreaRightX - originX) / pitch.widthPx);
   const ascent = (atlas.baselineFraction ?? DEFAULT_BASELINE_FRACTION) * pitch.heightPx;
 
   const rowTops = pitch.rowYCenters.map((yCenter, index) => {
     const baseline = pitch.rowBaselines?.[index];
     return baseline !== undefined ? baseline - ascent : yCenter - pitch.heightPx / 2;
   });
-  const digitAtlas = restrictAtlas(atlas, DIGITS);
-  const numberRightEdgeX = findNumberRightEdge(image, margins, pitch, digitAtlas, rowTops);
+  const numbers = readLineNumbers(
+    image,
+    margins,
+    atlas,
+    rowTops.map((top) => ({ top, bottom: top + pitch.heightPx }))
+  );
 
-  return rowTops.map((rowTop) => {
+  return rowTops.map((rowTop, index) => {
     const rowBottom = rowTop + pitch.heightPx;
-
-    const { lineNumber, confidence, isWrappedContinuation } = readLineNumber(
-      image,
-      margins,
-      pitch,
-      digitAtlas,
-      rowTop,
-      numberRightEdgeX
-    );
+    const number = numbers[index];
 
     const cells: CellResult[] = [];
     for (let col = 0; col < columnCount; col++) {
-      const rect = cellRect(textAreaLeftX + col * pitch.widthPx, rowTop, pitch, margins);
+      const rect = cellRect(originX + col * pitch.widthPx, rowTop, pitch, margins);
       cells.push(cellResultFromMatch(rect, matchCell(image, rect, atlas)));
     }
 
     return {
-      lineNumber,
-      lineNumberConfidence: confidence,
+      lineNumber: number.value,
+      lineNumberConfidence: number.confidence,
       cells,
       yRangePx: { top: rowTop, bottom: rowBottom },
-      isWrappedContinuation,
+      isWrappedContinuation: !number.hasNumber,
     };
   });
 }

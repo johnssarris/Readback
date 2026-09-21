@@ -35,12 +35,32 @@ const CASES = [
   // Narrow enough that the long lines wrap, which is what plain view's WRAP
   // setting produces: continuation rows carrying text and no line number.
   { name: "code-wrapped", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 560, height: 820, wrap: true },
+  // A maximised window on a 1080p screen, which is how the editor is actually
+  // going to be sitting: wider than the 1600px the capture is rectified to, so
+  // the pipeline shrinks it rather than blowing it up. Different text as well -
+  // deep indentation, lines long enough to wrap even this wide, 0O1lI, dense
+  // punctuation, blank lines.
+  { name: "varied-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1040, wrap: true },
+  // The line number margin left in another face, as it is on a machine where
+  // that step of the setup was skipped. Its advance width is not the text's.
+  { name: "gutter-courier", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "courier-prime" },
+  { name: "gutter-inconsolata", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "inconsolata" },
 ];
 
-const fontDataUrl = (() => {
-  const buf = readFileSync(join(repo, "public", "fonts", "cascadia-mono-latin-400-normal.woff2"));
-  return `data:font/woff2;base64,${buf.toString("base64")}`;
-})();
+const dataUrl = (path) => `data:font/woff2;base64,${readFileSync(path).toString("base64")}`;
+
+const fontDataUrl = dataUrl(join(repo, "public", "fonts", "cascadia-mono-latin-400-normal.woff2"));
+
+/**
+ * Stand-ins for a gutter left in whatever font the theme had, on a machine
+ * where the line number margin was never set to the text's face. Courier New
+ * and Consolas can't be redistributed; these are the OFL faces closest to them
+ * in shape and in advance width, which is what the pipeline has to cope with.
+ */
+const GUTTER_FONTS = {
+  "courier-prime": join(repo, "node_modules", "@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2"),
+  inconsolata: join(repo, "node_modules", "@fontsource/inconsolata/files/inconsolata-latin-400-normal.woff2"),
+};
 
 /**
  * Lays out text the way a monospace editor does — every character at its own
@@ -69,9 +89,17 @@ window.render = async (opts) => {
   const face = new FontFace("CascadiaMono", \`url(\${opts.fontDataUrl})\`);
   await face.load();
   document.fonts.add(face);
+  if (opts.gutterFontDataUrl) {
+    const gutterFace = new FontFace("GutterFont", \`url(\${opts.gutterFontDataUrl})\`);
+    await gutterFace.load();
+    document.fonts.add(gutterFace);
+  }
   await document.fonts.ready;
   if (!document.fonts.check(\`\${opts.fontPx}px CascadiaMono\`)) {
     throw new Error("Cascadia Mono did not load in the renderer");
+  }
+  if (opts.gutterFontDataUrl && !document.fonts.check(\`\${opts.fontPx}px GutterFont\`)) {
+    throw new Error("Gutter font did not load in the renderer");
   }
 
   const c = document.getElementById("c");
@@ -86,11 +114,16 @@ window.render = async (opts) => {
   const ascent = metrics.actualBoundingBoxAscent;
   const descent = metrics.actualBoundingBoxDescent;
 
+  const gutterFamily = opts.gutterFontDataUrl ? "GutterFont" : "CascadiaMono";
+  ctx.font = \`\${opts.fontPx}px \${gutterFamily}\`;
+  const gutterAdvance = ctx.measureText("0").width;
+  ctx.font = \`\${opts.fontPx}px CascadiaMono\`;
+
   const lines = opts.text.split("\\n");
   const digits = String(lines.length).length;
   // Notepad++ sizes the line number margin to fit the widest number, plus padding.
-  const gutterPad = Math.round(advance * 0.6);
-  const gutterRightEdgeX = Math.round(gutterPad * 2 + digits * advance);
+  const gutterPad = Math.round(gutterAdvance * 0.6);
+  const gutterRightEdgeX = Math.round(gutterPad * 2 + digits * gutterAdvance);
 
   const chromeTop = Math.round(opts.lineHeight * 2.2);   // menu bar + tab bar
   const chromeBottom = Math.round(opts.lineHeight * 1.3); // status bar
@@ -134,11 +167,13 @@ window.render = async (opts) => {
 
     if (row.number !== null) {
       const number = String(row.number);
+      ctx.font = \`\${opts.fontPx}px \${gutterFamily}\`;
       for (let k = 0; k < number.length; k++) {
         // Right-aligned against the inner edge of the margin.
-        const x = gutterRightEdgeX - gutterPad - (number.length - k) * advance;
+        const x = gutterRightEdgeX - gutterPad - (number.length - k) * gutterAdvance;
         ctx.fillText(number[k], x, baseline);
       }
+      ctx.font = \`\${opts.fontPx}px CascadiaMono\`;
     }
     for (let col = 0; col < row.text.length; col++) {
       const x = gutterRightEdgeX + col * advance;
@@ -163,9 +198,13 @@ window.render = async (opts) => {
       lineCount,
       /** The rows as laid out, for metrics that score the grid rather than the text. */
       displayRows: visibleRows.map((r) => r.text),
+      /** The line number shown on each display row, null on a wrapped continuation. */
+      rowNumbers: visibleRows.map((r) => r.number),
       rowYCenters,
       fontPx: opts.fontPx,
       wrapped: Boolean(opts.wrap),
+      gutterFont: opts.gutterFont ?? null,
+      gutterAdvancePx: gutterAdvance,
     },
   };
 };
@@ -184,7 +223,12 @@ for (const spec of CASES) {
   const text = readFileSync(join(fixtures, spec.source), "utf8").replace(/\n$/, "");
   const result = await page.evaluate(
     (opts) => window.render(opts),
-    { ...spec, text, fontDataUrl }
+    {
+      ...spec,
+      text,
+      fontDataUrl,
+      gutterFontDataUrl: spec.gutterFont ? dataUrl(GUTTER_FONTS[spec.gutterFont]) : null,
+    }
   );
 
   const png = Buffer.from(result.dataUrl.split(",")[1], "base64");
@@ -195,7 +239,9 @@ for (const spec of CASES) {
       {
         kind: "render",
         text: spec.source,
-        note: "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison.",
+        note:
+          "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison." +
+          (spec.gutterFont ? ` Line number margin in ${spec.gutterFont}, not the text's face.` : ""),
         truth: result.truth,
       },
       null,

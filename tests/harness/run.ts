@@ -15,6 +15,7 @@ import {
   inkAccuracy,
   indentAccuracy,
   inkMap,
+  numberAccuracy,
   type Metrics,
 } from "./metrics";
 
@@ -85,8 +86,12 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   let text: string | null = null;
   const atlas = loadAtlas();
   if (atlas && Number.isFinite(pitch.widthPx) && pitch.widthPx > 0 && pitch.rowYCenters.length > 0) {
-    text = rowsToText(buildRows(rectified, margins, pitch, atlas));
+    const rows = buildRows(rectified, margins, pitch, atlas);
+    text = rowsToText(rows);
     metrics.cer = characterErrorRate(text, fixture.lines.join("\n"));
+
+    const expected = fixture.meta.truth?.rowNumbers;
+    if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
   return { margins, pitch, metrics, text, rectified, scale };
@@ -103,7 +108,7 @@ function score(
 
   const columns =
     Number.isFinite(pitch.widthPx) && pitch.widthPx > 0
-      ? Math.floor((margins.textAreaRightX - margins.textAreaLeftX) / pitch.widthPx)
+      ? Math.floor((margins.textAreaRightX - pitch.columnOriginX) / pitch.widthPx)
       : 0;
   const map = columns > 0 ? inkMap(rectified, margins, pitch, columns) : [];
 
@@ -131,6 +136,7 @@ function score(
     inkAccuracy: inkAccuracy(map, fixture.rows),
     indentAccuracy: indentAccuracy(map, fixture.rows),
     cer: null,
+    numberAccuracy: null,
   };
 }
 

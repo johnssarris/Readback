@@ -27,6 +27,34 @@ export interface Metrics {
   indentAccuracy: number;
   /** Character error rate, when an atlas was available. */
   cer: number | null;
+  /** Rows whose line number - or absence of one - was read correctly. */
+  numberAccuracy: number | null;
+}
+
+/**
+ * Fraction of rows whose line number came back right, counting a row that
+ * should have had no number and got one (or the reverse) as wrong.
+ *
+ * Nothing else measures this: a misread number costs nothing in CER unless it
+ * is missed entirely, in which case the row is taken for a wrapped continuation
+ * and its line is glued onto the one above.
+ */
+export function numberAccuracy(
+  rows: Array<{ lineNumber: number; isWrappedContinuation: boolean }>,
+  expected: (number | null)[]
+): number {
+  let correct = 0;
+  for (let i = 0; i < expected.length; i++) {
+    const row = rows[i];
+    const want = expected[i];
+    if (!row) continue;
+    if (want === null) {
+      if (row.isWrappedContinuation) correct++;
+    } else if (!row.isWrappedContinuation && row.lineNumber === want) {
+      correct++;
+    }
+  }
+  return expected.length === 0 ? 0 : correct / expected.length;
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -83,7 +111,7 @@ export function inkMap(
     const samples: number[] = [];
     for (let y = top; y < bottom; y++) {
       if (y < 0) continue;
-      for (let x = Math.round(margins.textAreaLeftX); x < Math.round(margins.textAreaRightX); x += 3) {
+      for (let x = Math.round(pitch.columnOriginX); x < Math.round(margins.textAreaRightX); x += 3) {
         const i = (y * image.width + x) * 4;
         samples.push(luminance(image.data[i], image.data[i + 1], image.data[i + 2]));
       }
@@ -94,8 +122,8 @@ export function inkMap(
 
     const row: boolean[] = [];
     for (let col = 0; col < columns; col++) {
-      const x0 = Math.round(margins.textAreaLeftX + col * pitch.widthPx);
-      const x1 = Math.round(margins.textAreaLeftX + (col + 1) * pitch.widthPx);
+      const x0 = Math.round(pitch.columnOriginX + col * pitch.widthPx);
+      const x1 = Math.round(pitch.columnOriginX + (col + 1) * pitch.widthPx);
       let darkest = 255;
       for (let y = top; y < bottom; y++) {
         if (y < 0) continue;

@@ -137,6 +137,34 @@ describe("matchCell", () => {
     expect(result.confidence).toBeLessThan(0.55);
   });
 
+  it("reads a blank cell beside a wide neighbour as a space", () => {
+    // Two cells side by side: the left one holds a glyph whose ink reaches its
+    // own right edge and, blurred, a column or two into the cell beside it. The
+    // right cell is empty, and has to read as empty.
+    const width = SIZE * 2;
+    const data = new Uint8ClampedArray(width * SIZE * 4);
+    const bleed = [60, 230]; // what is left of the neighbour's ink, a column in
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < width; x++) {
+        const gray = x < SIZE ? 0 : (bleed[x - SIZE] ?? 255);
+        const i = (y * width + x) * 4;
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+        data[i + 3] = 255;
+      }
+    }
+    const scene = { width, height: SIZE, data, colorSpace: "srgb" } as ImageData;
+
+    const { image: atlasImage, manifest } = buildTestAtlasImage({ "0": RING, " ": BLANK, I: STRIPE });
+    const atlas = buildAtlasFromImageData(atlasImage, manifest);
+
+    // Across the whole cell that fringe is 195 levels of contrast, well past the
+    // blank threshold; across the middle of it, 25.
+    const result = matchCell(scene, { x: SIZE, y: 0, w: SIZE, h: SIZE }, atlas);
+    expect(result.char).toBe(" ");
+  });
+
   it("reads a blank cell as a space rather than the first glyph in the atlas", () => {
     // Correlation can't decide this: a blank cell is flat, so every glyph scores
     // the same and the winner is whichever the atlas happens to list first - and

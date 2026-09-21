@@ -1,9 +1,11 @@
-import { findRuns, luminance, median, otsuThreshold } from "./imageUtils";
+import { findRuns, inkThreshold, luminance, median, otsuThreshold } from "./imageUtils";
 import type { MarginBounds } from "./margins";
 
 export interface CellPitch {
   widthPx: number;
   heightPx: number;
+  /** Left edge of the first character cell, in full rectified-image coordinates. */
+  columnOriginX: number;
   /** Vertical center (in full rectified-image coordinates) of each displayed row's line box. */
   rowYCenters: number[];
   /**
@@ -30,6 +32,12 @@ const WIDTH_FINE_STEP = 0.005;
 
 /** How far either side of the coarse width the sharper measure looks. */
 const WIDTH_POLISH = 0.04;
+
+/** Step (px) of the continuous sweep for the phase of a cell boundary. */
+const PHASE_STEP = 0.1;
+
+/** Width of the band read at each boundary, as a share of the cell. */
+const BOUNDARY_BAND = 0.12;
 
 /** Phase bins used to score a candidate width. */
 const PHASE_BINS = 12;
@@ -60,10 +68,6 @@ const BAND_THRESHOLD = 0.15;
 /** Share of a typical row's ink that separates a row with only a line number on it from noise. */
 const MIN_ROW_INK_SHARE = 0.02;
 
-/** Where in a row's own brightness the page colour is read, and how far below it ink sits. */
-const PAGE_PERCENTILE = 0.75;
-const INK_FRACTION_OF_PAGE = 0.55;
-
 /**
  * A line number's ink is at least this tall, as a share of the line spacing -
  * cap height is well over half a line box in any face. Below it, a band is the
@@ -85,12 +89,6 @@ const MAX_ROW_OVERHANG = 0.25;
 const PITCH_POLISH = 0.06;
 const ROW_PITCH_STEP = 0.02;
 
-/** Typical width/height ratio of a monospace cell; the last-resort seed when there is no text to measure. */
-const ASSUMED_ASPECT_RATIO = 0.5;
-
-/** Rows whose digit blob is narrower than this fraction of the seed cell width are treated as blank. */
-const MIN_BLOB_WIDTH_FRACTION = 0.4;
-
 /**
  * Derives the actual on-image character cell pitch from the capture itself,
  * rather than trusting screen-side font/DPI constants (see plan: Design decisions,
@@ -100,15 +98,46 @@ export function calibrateCellPitch(image: ImageData, margins: MarginBounds): Cel
   const gutter = analyzeGutter(image, margins);
   const rows = detectRows(image, margins, gutter);
 
-  const widthPx =
-    estimateWidthFromText(image, margins, rows.pitch) ?? gutter.widthFromDigits(rows.pitch * ASSUMED_ASPECT_RATIO);
+  // No text on screen, no grid: the line numbers cannot stand in for it, since
+  // the margin's font is a setting of its own and its advance need not be the
+  // text's at all. A capture with nothing to measure has nothing to read either,
+  // and callers check this before going on.
+  const columns = fitColumns(image, margins, rows.pitch);
+  const widthPx = columns?.width ?? NaN;
+
+  // Where the gutter's background ends is the editor's left margin, which is
+  // where the first cell starts only if the theme adds no padding there. The
+  // text's own boundaries say where the cells really are; the margin is only
+  // consulted when there is not enough text to ask.
+  const columnOriginX = columns
+    ? firstColumnOrigin(columns.originX, widthPx, margins.textAreaLeftX)
+    : margins.textAreaLeftX;
 
   return {
     widthPx,
     heightPx: rows.pitch,
+    columnOriginX,
     rowYCenters: rows.centers,
     rowBaselines: rows.baselines,
   };
+
+}
+
+/**
+ * Picks the cell boundary the first column starts at.
+ *
+ * The boundaries repeat every cell, so any one of them describes the same grid.
+ * Which one is column zero is decided by the editor's left margin: the first
+ * boundary at or after it. Taking the nearest one instead would put a boundary
+ * inside the margin's padding whenever that padding is more than half a cell,
+ * and every line would come back with a blank column in front of it.
+ *
+ * The margin itself is measured, so a boundary a hair to the left of it is the
+ * same boundary; the width of a gap between characters is the natural slack.
+ */
+function firstColumnOrigin(originX: number, width: number, marginX: number): number {
+  const steps = Math.ceil((marginX - width * BOUNDARY_BAND - originX) / width);
+  return originX + steps * width;
 }
 
 /**
@@ -188,7 +217,7 @@ function rowPitch(profile: number[], lineSpacing: number): number {
   for (let pitch = coarse * (1 - PITCH_POLISH); pitch <= coarse * (1 + PITCH_POLISH); pitch += ROW_PITCH_STEP) {
     // Same pairing as the cell width: the spread of the ink keeps the answer on
     // the right pitch, the gap between rows sharpens it.
-    const score = gapDepth(profile, pitch) * periodicityScore(profile, pitch);
+    const score = emptiestPhase(profile, pitch).depth * periodicityScore(profile, pitch);
     if (score > refinedScore) {
       refinedScore = score;
       refined = pitch;
@@ -300,12 +329,6 @@ function withInk(centers: number[], profile: number[], y0: number, pitch: number
   return centers.slice(first, last + 1);
 }
 
-/** The value at `fraction` of the way up a set of samples. */
-function percentile(values: number[], fraction: number): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
-}
-
 /** Median gap between the centers of consecutive bands. */
 function spacingOf(bands: Array<{ start: number; end: number }>): number {
   const diffs: number[] = [];
@@ -346,8 +369,7 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
       row[x - x0] = luminance(image.data[i], image.data[i + 1], image.data[i + 2]);
     }
 
-    const page = percentile(row, PAGE_PERCENTILE);
-    const threshold = page * INK_FRACTION_OF_PAGE;
+    const threshold = inkThreshold(row);
     let count = 0;
     for (const value of row) if (value <= threshold) count++;
     counts[y - y0] = count > limit ? 0 : count;
@@ -356,8 +378,8 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
 }
 
 /**
- * Measures the advance width from the text itself, by finding the column
- * spacing the text area is actually periodic at.
+ * Measures the character grid from the text itself: how wide a cell is, and
+ * where the boundary between one cell and the next falls.
  *
  * The gutter can only offer the width of a digit's ink, which is narrower than
  * the cell that holds it by both side bearings - a systematic underestimate that
@@ -365,7 +387,7 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
  * characters laid out on the real grid, and the spacing that grid repeats at is
  * the advance width, whatever the ink inside each cell happens to look like.
  */
-function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeightPx: number): number | null {
+function fitColumns(image: ImageData, margins: MarginBounds, cellHeightPx: number): GridFit | null {
   if (!Number.isFinite(cellHeightPx) || cellHeightPx <= 0) return null;
 
   const x0 = Math.max(0, Math.round(margins.textAreaLeftX));
@@ -380,16 +402,16 @@ function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeig
   const minWidth = cellHeightPx * MIN_ADVANCE_RATIO;
   const maxWidth = cellHeightPx * MAX_ADVANCE_RATIO;
 
-  let bestWidth = null;
-  let bestScore = -Infinity;
+  let coarse = null;
+  let coarseScore = -Infinity;
   for (let width = minWidth; width <= maxWidth; width += WIDTH_COARSE_STEP) {
     const score = periodicityScore(profile, width);
-    if (score > bestScore) {
-      bestScore = score;
-      bestWidth = width;
+    if (score > coarseScore) {
+      coarseScore = score;
+      coarse = width;
     }
   }
-  if (bestWidth === null) return null;
+  if (coarse === null) return null;
 
   // Sharpen it, now also on the gaps between characters. Which spacing the text
   // repeats at is a coarse question and the spread of the ink answers it; how
@@ -398,16 +420,81 @@ function estimateWidthFromText(image: ImageData, margins: MarginBounds, cellHeig
   // shows first - they fill in as soon as the grid starts sliding off the
   // characters - while the spread keeps the answer anchored to the right
   // spacing rather than a slightly better-looking neighbour.
-  let refined = bestWidth;
-  let refinedScore = -Infinity;
-  for (let width = bestWidth * (1 - WIDTH_POLISH); width <= bestWidth * (1 + WIDTH_POLISH); width += WIDTH_FINE_STEP) {
-    const score = gapDepth(profile, width) * periodicityScore(profile, width);
-    if (score > refinedScore) {
-      refinedScore = score;
-      refined = width;
+  //
+  // The phase that empties the gaps is the grid's own origin, so it comes back
+  // with the width rather than being assumed from the margin.
+  let best: GridFit | null = null;
+  let bestScore = -Infinity;
+  for (let width = coarse * (1 - WIDTH_POLISH); width <= coarse * (1 + WIDTH_POLISH); width += WIDTH_FINE_STEP) {
+    const gap = emptiestPhase(profile, width);
+    const score = gap.depth * periodicityScore(profile, width);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { width, originX: x0 + gap.phase };
     }
   }
-  return refined;
+  return best;
+}
+
+interface GridFit {
+  width: number;
+  originX: number;
+}
+
+/**
+ * The phase within a cell where the text has least ink, and how empty it is.
+ *
+ * At the right width and phase every cell boundary lands in the gap between two
+ * characters, and that phase comes out close to empty. A width that is slightly
+ * wrong slides the boundary onto the characters a little more with every
+ * column, and the gap fills in - which makes this a much sharper measure of a
+ * small error than the overall spread of the ink, and it names the boundary
+ * outright.
+ *
+ * The phase is swept continuously rather than binned, because the boundary is
+ * wanted to a fraction of a pixel: a bin wide enough to hold a useful number of
+ * columns is a tenth of a cell, and a tenth of a cell is the difference between
+ * a template landing on a glyph and landing between two.
+ */
+function emptiestPhase(profile: number[], width: number): { phase: number; depth: number } {
+  let total = 0;
+  for (const value of profile) total += value;
+  if (total === 0) return { phase: 0, depth: 0 };
+  const mean = total / profile.length;
+
+  // Each boundary is read as a narrow band rather than a single line of pixels:
+  // one line is a sample of one, and noise in it moves the answer.
+  const half = (width * BOUNDARY_BAND) / 2;
+
+  let bestPhase = 0;
+  let leastInk = Infinity;
+  for (let phase = 0; phase < width; phase += PHASE_STEP) {
+    let ink = 0;
+    let samples = 0;
+    for (let x = phase; x < profile.length; x += width) {
+      for (let dx = -half; dx <= half; dx += PHASE_STEP) {
+        ink += sampleAt(profile, x + dx);
+        samples++;
+      }
+    }
+    if (samples === 0) continue;
+    const perBoundary = ink / samples;
+    if (perBoundary < leastInk) {
+      leastInk = perBoundary;
+      bestPhase = phase;
+    }
+  }
+
+  return { phase: bestPhase, depth: Math.max(0, (mean - leastInk) / mean) };
+}
+
+/** The profile at a fractional position, between its two neighbouring columns. */
+function sampleAt(profile: number[], x: number): number {
+  const i = Math.floor(x);
+  if (i < 0 || i >= profile.length) return 0;
+  if (i + 1 >= profile.length) return profile[i];
+  const f = x - i;
+  return profile[i] * (1 - f) + profile[i + 1] * f;
 }
 
 /** Foreground pixel count per column, thresholded over the region as a whole. */
@@ -440,43 +527,28 @@ function columnInkProfile(image: ImageData, x0: number, x1: number, y0: number, 
  * spreads evenly across phases, so the contrast collapses.
  */
 function periodicityScore(profile: number[], width: number): number {
-  const bins = new Array(PHASE_BINS).fill(0);
+  // Never more bins than the width has pixels. A window wider than the 1600px a
+  // capture is rectified to gets shrunk, not blown up, and its cells come out
+  // under ten pixels across - at which point twelve bins leaves some of them
+  // with no samples at all, and the gaps between them read as contrast. Every
+  // candidate width then scores by how badly it aliases rather than how well it
+  // fits, and the narrowest wins.
+  const binCount = Math.max(2, Math.min(PHASE_BINS, Math.floor(width)));
+
+  const bins = new Array(binCount).fill(0);
   let total = 0;
 
   for (let x = 0; x < profile.length; x++) {
     const phase = ((x % width) + width) % width;
-    bins[Math.min(PHASE_BINS - 1, Math.floor((phase / width) * PHASE_BINS))] += profile[x];
+    bins[Math.min(binCount - 1, Math.floor((phase / width) * binCount))] += profile[x];
     total += profile[x];
   }
   if (total === 0) return 0;
 
-  const mean = total / PHASE_BINS;
+  const mean = total / binCount;
   let variance = 0;
   for (const bin of bins) variance += (bin - mean) ** 2;
   return variance / (mean * mean);
-}
-
-/**
- * How empty the emptiest phase of a cell is, relative to the average.
- *
- * At the right width every cell boundary lands in the gap between characters,
- * and one phase comes out close to empty. A width that is slightly wrong slides
- * the boundary onto the characters a little more with every column, and the gap
- * fills in - which makes this a much sharper measure of a small error than the
- * overall spread of the ink.
- */
-function gapDepth(profile: number[], width: number): number {
-  const bins = new Array(PHASE_BINS).fill(0);
-  let total = 0;
-  for (let x = 0; x < profile.length; x++) {
-    const phase = ((x % width) + width) % width;
-    bins[Math.min(PHASE_BINS - 1, Math.floor((phase / width) * PHASE_BINS))] += profile[x];
-    total += profile[x];
-  }
-  if (total === 0) return 0;
-
-  const mean = total / PHASE_BINS;
-  return (mean - Math.min(...bins)) / mean;
 }
 
 interface GutterAnalysis {
@@ -484,8 +556,6 @@ interface GutterAnalysis {
   cellHeightPx: number;
   /** The vertical extent of each row's line-number ink; its end is that row's baseline. */
   digitRuns: Array<{ start: number; end: number }>;
-  /** The old estimate: digit ink extent divided by digit count. Biased narrow; a last resort. */
-  widthFromDigits: (seedWidth: number) => number;
 }
 
 /** Row bands and their digit blobs, from the line number margin. */
@@ -533,37 +603,7 @@ function analyzeGutter(image: ImageData, margins: MarginBounds): GutterAnalysis 
   const rowRuns = filterShortBands(bands, spacingOf(bands));
   const rowYCenters = rowRuns.map((r) => bodyTopY + (r.start + r.end) / 2);
   const cellHeightPx = spacingOf(rowRuns);
-
-  const widthFromDigits = (seedWidth: number): number => {
-    const refinedWidths: number[] = [];
-    for (const run of rowRuns) {
-      let minX = -1;
-      let maxX = -1;
-      for (let x = 0; x < cropWidth; x++) {
-        let hasForeground = false;
-        for (let y = run.start; y < run.end; y++) {
-          if (isForeground(gray[y * cropWidth + x])) {
-            hasForeground = true;
-            break;
-          }
-        }
-        if (hasForeground) {
-          if (minX === -1) minX = x;
-          maxX = x;
-        }
-      }
-      if (minX === -1) continue;
-
-      const blobWidth = maxX - minX + 1;
-      if (blobWidth < seedWidth * MIN_BLOB_WIDTH_FRACTION) continue;
-
-      const digitCount = Math.max(1, Math.round(blobWidth / seedWidth));
-      refinedWidths.push(blobWidth / digitCount);
-    }
-    return refinedWidths.length > 0 ? median(refinedWidths) : seedWidth;
-  };
-
   const digitRuns = rowRuns.map((r) => ({ start: bodyTopY + r.start, end: bodyTopY + r.end }));
 
-  return { rowYCenters, cellHeightPx, digitRuns, widthFromDigits };
+  return { rowYCenters, cellHeightPx, digitRuns };
 }

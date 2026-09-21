@@ -166,6 +166,30 @@ export function resampleToGray(image: ImageData, rect: Rect, destWidth: number, 
   return dest;
 }
 
+/**
+ * Where ink stops and page begins, for a region of a capture.
+ *
+ * Read against the region's own brightness rather than a level fixed for the
+ * whole image: light falls unevenly across a photographed screen, and a
+ * threshold that fits the top of the window calls the bottom corner ink. The
+ * page is read above any text on it, and ink sits far below the page it is
+ * drawn on - far enough that neither sensor noise nor a darkening corner
+ * reaches it.
+ */
+export function inkThreshold(values: number[]): number {
+  return percentile(values, PAGE_PERCENTILE) * INK_FRACTION_OF_PAGE;
+}
+
+const PAGE_PERCENTILE = 0.9;
+const INK_FRACTION_OF_PAGE = 0.55;
+
+/** The value at `fraction` of the way up a set of samples. */
+export function percentile(values: number[], fraction: number): number {
+  if (values.length === 0) return 255;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+}
+
 export function median(values: number[]): number {
   if (values.length === 0) return NaN;
   const sorted = [...values].sort((a, b) => a - b);

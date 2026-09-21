@@ -33,7 +33,12 @@ One-time setup:
      Comment & Number tab > Number style > Styler: same settings.
      Restart Notepad++.
   2. Set Settings > Style Configurator > Global Styles > Line number margin
-     to Cascadia Mono as well, same size, bold/italic/underline unchecked.
+     to Cascadia Mono, and leave its size blank. Font only: this script sets
+     the size itself while plain view is on, and a size set here would apply
+     the rest of the time too. Scintilla takes a line's height from the
+     tallest style on it, so a gutter size larger than your normal text size
+     would change line spacing for all your ordinary editing. Leave
+     bold/italic/underline unchecked.
      The gutter takes its font from there, not from the UDL.
   3. Test from a terminal: python plain_view.py  (run twice)
   4. Add a hotkey: Run > Run..., enter

@@ -32,6 +32,8 @@ export interface FixtureMeta {
     lineCount?: number;
     /** The rows as the editor laid them out, for metrics that score the grid rather than the text. */
     displayRows?: string[];
+    /** The line number on each display row; null where the row is a wrapped continuation. */
+    rowNumbers?: (number | null)[];
     rowYCenters: number[];
     fontPx: number;
     wrapped?: boolean;
