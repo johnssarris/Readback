@@ -46,9 +46,12 @@ The text file has to hold exactly what the window shows - if the document
 runs past the bottom of the screenful, cut it there, since nothing below the
 window edge can be read from the image.
 
-That is all a screenshot needs. A **photo** also needs the window's corners in
-image pixels, clockwise from the top left, because nothing in the image says
-where the window edge is:
+That is all a screenshot needs, and all a **photo** needs too when the corner
+markers are in the shot: they are found in the image and the pane's corners
+come from them.
+
+Without markers, a photo has to say where the window is, since nothing in the
+image does — corners in image pixels, clockwise from the top left:
 
 ```json
 {
@@ -58,7 +61,9 @@ where the window edge is:
 }
 ```
 
-No code changes are needed for either — the harness picks up whatever is here.
+No code changes are needed for any of them — the harness picks up whatever is
+here. Markers come first when they are found, then the sidecar's corners, and
+a flat capture with neither is taken to be its own frame.
 
 A fixture may also carry a `truth` block (cell pitch, body bounds, gutter edge,
 row centers) when the geometry is known exactly, as it is for a render. Metrics
