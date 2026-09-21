@@ -32,6 +32,18 @@ const DOT = drawPattern(
 
 const BLANK = drawPattern(new Array(SIZE * SIZE).fill(255));
 
+// High contrast, but nothing like any of the glyphs above.
+const CHECKER = drawPattern(
+  Array.from({ length: SIZE }, (_, y) =>
+    Array.from({ length: SIZE }, (_, x) => ((x + y) % 2 === 0 ? 0 : 255))
+  ).flat()
+);
+
+/** A blank cell as a photograph gives it: uniform page, plus a little sensor noise. */
+const NOISY_BLANK = drawPattern(
+  Array.from({ length: SIZE * SIZE }, (_, i) => 232 + ((i * 7) % 5))
+);
+
 /** Packs one or more named grayscale patterns side-by-side into a single ImageData + manifest. */
 function buildTestAtlasImage(patterns: Record<string, Float32Array>): { image: ImageData; manifest: AtlasManifest } {
   const chars = Object.keys(patterns);
@@ -118,10 +130,24 @@ describe("matchCell", () => {
     const { image: atlasImage, manifest } = buildTestAtlasImage({ I: STRIPE, O: RING, ".": DOT });
     const atlas = buildAtlasFromImageData(atlasImage, manifest);
 
-    const cellImage = patternAsImage(BLANK);
+    const cellImage = patternAsImage(CHECKER);
     const result = matchCell(cellImage, { x: 0, y: 0, w: SIZE, h: SIZE }, atlas);
 
     expect(result.flagged).toBe(true);
     expect(result.confidence).toBeLessThan(0.55);
+  });
+
+  it("reads a blank cell as a space rather than the first glyph in the atlas", () => {
+    // Correlation can't decide this: a blank cell is flat, so every glyph scores
+    // the same and the winner is whichever the atlas happens to list first - and
+    // the space template is flat too, so it can never win on its own merits.
+    const { image: atlasImage, manifest } = buildTestAtlasImage({ "0": RING, " ": BLANK, I: STRIPE });
+    const atlas = buildAtlasFromImageData(atlasImage, manifest);
+
+    for (const pattern of [BLANK, NOISY_BLANK]) {
+      const result = matchCell(patternAsImage(pattern), { x: 0, y: 0, w: SIZE, h: SIZE }, atlas);
+      expect(result.char).toBe(" ");
+      expect(result.flagged).toBe(false);
+    }
   });
 });
