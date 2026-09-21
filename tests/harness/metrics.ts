@@ -27,6 +27,34 @@ export interface Metrics {
   indentAccuracy: number;
   /** Character error rate, when an atlas was available. */
   cer: number | null;
+  /** Rows whose line number - or absence of one - was read correctly. */
+  numberAccuracy: number | null;
+}
+
+/**
+ * Fraction of rows whose line number came back right, counting a row that
+ * should have had no number and got one (or the reverse) as wrong.
+ *
+ * Nothing else measures this: a misread number costs nothing in CER unless it
+ * is missed entirely, in which case the row is taken for a wrapped continuation
+ * and its line is glued onto the one above.
+ */
+export function numberAccuracy(
+  rows: Array<{ lineNumber: number; isWrappedContinuation: boolean }>,
+  expected: (number | null)[]
+): number {
+  let correct = 0;
+  for (let i = 0; i < expected.length; i++) {
+    const row = rows[i];
+    const want = expected[i];
+    if (!row) continue;
+    if (want === null) {
+      if (row.isWrappedContinuation) correct++;
+    } else if (!row.isWrappedContinuation && row.lineNumber === want) {
+      correct++;
+    }
+  }
+  return expected.length === 0 ? 0 : correct / expected.length;
 }
 
 export function levenshtein(a: string, b: string): number {

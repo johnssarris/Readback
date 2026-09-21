@@ -13,7 +13,7 @@ pipeline and prints a table. Run it with `npm run metrics`.
 
 ## Kinds
 
-**`render`** — Chromium-rendered stand-in, produced by `node tools/render-fixtures.mjs`.
+**`render`** — Chromium-rendered stand-in, produced by `npm run fixtures`.
 Chromium and the canvas-built glyph atlas share a rasterizer, so these flatter a
 canvas atlas and **cannot** settle a question about where the atlas should come
 from. Their numbers are geometry only: margins, cell pitch, row detection,
@@ -24,6 +24,11 @@ Windows display scaling. This is what the geometry and recognition numbers
 should be read from.
 
 **`photo`** — shot with a phone, as the app actually sees a screen.
+
+Two of the renders put the line number margin in another face - Courier Prime
+and Inconsolata, the OFL fonts closest to Courier New and Consolas, which
+cannot be redistributed. That is the machine where the margin was never set to
+the text's font, and its advance width is not the text's.
 
 ## Adding one
 

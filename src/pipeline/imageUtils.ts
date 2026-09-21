@@ -166,6 +166,13 @@ export function resampleToGray(image: ImageData, rect: Rect, destWidth: number, 
   return dest;
 }
 
+/** The value at `fraction` of the way up a set of samples. */
+export function percentile(values: number[], fraction: number): number {
+  if (values.length === 0) return 255;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+}
+
 export function median(values: number[]): number {
   if (values.length === 0) return NaN;
   const sorted = [...values].sort((a, b) => a - b);

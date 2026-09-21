@@ -122,10 +122,12 @@ describe("calibrateCellPitch", () => {
     expect(result.heightPx).toBeCloseTo(10, 0);
   });
 
-  it("derives the per-character cell width, refining through multi-digit rows", () => {
+  it("reports no cell width for a screenful with no text on it", () => {
+    // The line numbers cannot stand in for the text: the margin's font is a
+    // setting of its own, and its advance need not be the text's at all.
     const { image, margins } = buildSyntheticGutter();
     const result = calibrateCellPitch(image, margins);
-    expect(result.widthPx).toBeCloseTo(6, 0);
+    expect(Number.isNaN(result.widthPx)).toBe(true);
   });
 
   it("puts the grid's origin where the text starts, not where the gutter ends", () => {

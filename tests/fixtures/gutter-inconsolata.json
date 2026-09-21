@@ -1,14 +1,14 @@
 {
   "kind": "render",
   "text": "sample-code.txt",
-  "note": "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison.",
+  "note": "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison. Line number margin in inconsolata, not the text's face.",
   "truth": {
     "cellWidthPx": 11.1328125,
     "cellHeightPx": 23,
     "bodyTopY": 51,
     "bodyBottomY": 590,
-    "gutterRightEdgeX": 36,
-    "textAreaLeftX": 36,
+    "gutterRightEdgeX": 31,
+    "textAreaLeftX": 31,
     "rowCount": 23,
     "lineCount": 23,
     "displayRows": [
@@ -88,7 +88,7 @@
     ],
     "fontPx": 19,
     "wrapped": false,
-    "gutterFont": null,
-    "gutterAdvancePx": 11.1328125
+    "gutterFont": "inconsolata",
+    "gutterAdvancePx": 9.500030517578125
   }
 }

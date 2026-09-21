@@ -61,6 +61,13 @@ export function detectMargins(image: ImageData): MarginBounds {
   const skipLeft = Math.round(width * EDGE_SKIP_FRACTION);
   const skipRight = width - Math.round(width * EDGE_SKIP_FRACTION);
 
+  // Anything before the skip is the window's own frame meeting the margin. A
+  // rectified capture carries a sliver of whatever was behind the screen along
+  // its edges, and that sliver is dark on every row - taken as part of the
+  // margin it reads as a line number on every row, including the wrapped ones
+  // that have none.
+  const gutterLeftX = [...colBoundaries].reverse().find((b) => b <= skipLeft) ?? 0;
+
   const gutterRightEdgeX = colBoundaries.find((b) => b > skipLeft) ?? Math.round(width * 0.08);
   const textAreaRightCandidate = [...colBoundaries].reverse().find((b) => b < skipRight && b > gutterRightEdgeX);
   const textAreaRightX = textAreaRightCandidate ?? width;
@@ -68,7 +75,7 @@ export function detectMargins(image: ImageData): MarginBounds {
   return {
     bodyTopY,
     bodyBottomY,
-    gutterLeftX: 0,
+    gutterLeftX,
     gutterRightEdgeX,
     textAreaLeftX: gutterRightEdgeX,
     textAreaRightX,

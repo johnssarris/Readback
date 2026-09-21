@@ -1,4 +1,4 @@
-import { findRuns, luminance, median, otsuThreshold } from "./imageUtils";
+import { findRuns, luminance, median, otsuThreshold, percentile } from "./imageUtils";
 import type { MarginBounds } from "./margins";
 
 export interface CellPitch {
@@ -93,12 +93,6 @@ const MAX_ROW_OVERHANG = 0.25;
 const PITCH_POLISH = 0.06;
 const ROW_PITCH_STEP = 0.02;
 
-/** Typical width/height ratio of a monospace cell; the last-resort seed when there is no text to measure. */
-const ASSUMED_ASPECT_RATIO = 0.5;
-
-/** Rows whose digit blob is narrower than this fraction of the seed cell width are treated as blank. */
-const MIN_BLOB_WIDTH_FRACTION = 0.4;
-
 /**
  * Derives the actual on-image character cell pitch from the capture itself,
  * rather than trusting screen-side font/DPI constants (see plan: Design decisions,
@@ -108,8 +102,12 @@ export function calibrateCellPitch(image: ImageData, margins: MarginBounds): Cel
   const gutter = analyzeGutter(image, margins);
   const rows = detectRows(image, margins, gutter);
 
+  // No text on screen, no grid: the line numbers cannot stand in for it, since
+  // the margin's font is a setting of its own and its advance need not be the
+  // text's at all. A capture with nothing to measure has nothing to read either,
+  // and callers check this before going on.
   const columns = fitColumns(image, margins, rows.pitch);
-  const widthPx = columns?.width ?? gutter.widthFromDigits(rows.pitch * ASSUMED_ASPECT_RATIO);
+  const widthPx = columns?.width ?? NaN;
 
   // Where the gutter's background ends is the editor's left margin, which is
   // where the first cell starts only if the theme adds no padding there. The
@@ -333,12 +331,6 @@ function withInk(centers: number[], profile: number[], y0: number, pitch: number
   while (first <= last && inks[first] < floor) first++;
   while (last >= first && inks[last] < floor) last--;
   return centers.slice(first, last + 1);
-}
-
-/** The value at `fraction` of the way up a set of samples. */
-function percentile(values: number[], fraction: number): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
 }
 
 /** Median gap between the centers of consecutive bands. */
@@ -569,8 +561,6 @@ interface GutterAnalysis {
   cellHeightPx: number;
   /** The vertical extent of each row's line-number ink; its end is that row's baseline. */
   digitRuns: Array<{ start: number; end: number }>;
-  /** The old estimate: digit ink extent divided by digit count. Biased narrow; a last resort. */
-  widthFromDigits: (seedWidth: number) => number;
 }
 
 /** Row bands and their digit blobs, from the line number margin. */
@@ -618,37 +608,7 @@ function analyzeGutter(image: ImageData, margins: MarginBounds): GutterAnalysis 
   const rowRuns = filterShortBands(bands, spacingOf(bands));
   const rowYCenters = rowRuns.map((r) => bodyTopY + (r.start + r.end) / 2);
   const cellHeightPx = spacingOf(rowRuns);
-
-  const widthFromDigits = (seedWidth: number): number => {
-    const refinedWidths: number[] = [];
-    for (const run of rowRuns) {
-      let minX = -1;
-      let maxX = -1;
-      for (let x = 0; x < cropWidth; x++) {
-        let hasForeground = false;
-        for (let y = run.start; y < run.end; y++) {
-          if (isForeground(gray[y * cropWidth + x])) {
-            hasForeground = true;
-            break;
-          }
-        }
-        if (hasForeground) {
-          if (minX === -1) minX = x;
-          maxX = x;
-        }
-      }
-      if (minX === -1) continue;
-
-      const blobWidth = maxX - minX + 1;
-      if (blobWidth < seedWidth * MIN_BLOB_WIDTH_FRACTION) continue;
-
-      const digitCount = Math.max(1, Math.round(blobWidth / seedWidth));
-      refinedWidths.push(blobWidth / digitCount);
-    }
-    return refinedWidths.length > 0 ? median(refinedWidths) : seedWidth;
-  };
-
   const digitRuns = rowRuns.map((r) => ({ start: bodyTopY + r.start, end: bodyTopY + r.end }));
 
-  return { rowYCenters, cellHeightPx, digitRuns, widthFromDigits };
+  return { rowYCenters, cellHeightPx, digitRuns };
 }
