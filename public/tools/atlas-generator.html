@@ -35,13 +35,10 @@
   </p>
 
   <div class="row">
-    <label>Cell size:
-      <input type="number" id="cellWidth" value="40" /> x
-      <input type="number" id="cellHeight" value="64" />
-    </label>
     <label>Font px size:
       <input type="number" id="fontSize" value="48" />
     </label>
+    <span class="status">Cell size comes from the font's own advance width and line box.</span>
   </div>
 
   <div class="row">
@@ -110,8 +107,6 @@
         manifest = renderAtlas(canvas, {
           family,
           fontSize: parseInt(document.getElementById("fontSize").value, 10),
-          cellWidth: parseInt(document.getElementById("cellWidth").value, 10),
-          cellHeight: parseInt(document.getElementById("cellHeight").value, 10),
         });
         status.textContent = `${CHARS.length} glyphs, cell ${manifest.cellWidth}x${manifest.cellHeight}`;
         canvas.toBlob((blob) => {

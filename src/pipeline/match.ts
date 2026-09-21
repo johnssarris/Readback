@@ -6,6 +6,8 @@ export interface AtlasManifest {
   fontFamily?: string;
   cellWidth: number;
   cellHeight: number;
+  /** Where the baseline sits inside a cell, as a fraction of its height. */
+  baselineFraction?: number;
   canvasWidth: number;
   canvasHeight: number;
   fontSize: number;

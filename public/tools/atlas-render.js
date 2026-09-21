@@ -61,36 +61,51 @@ export function measureFont(ctx, family, fontSize) {
   };
 }
 
+/** Blank pixels between cells on the sheet, so one glyph's antialiasing can't reach another's template. */
+const SHEET_PADDING = 8;
+
 /**
  * Draws every glyph into `canvas` and returns the manifest describing it.
  *
- * Each glyph sits centered in a fixed cell.
+ * Each cell is one editor character cell: exactly one advance width across, one
+ * line box tall, with the glyph drawn from the cell's left edge and sitting on a
+ * baseline at the font's ascent. That is where a glyph sits on screen, so a
+ * photographed cell resampled to this size lands on the template instead of
+ * beside it - a centered glyph in a loose cell correlates against every
+ * template a bit and none of them well.
  */
 export function renderAtlas(canvas, options = {}) {
   const family = options.family ?? ATLAS_FONT.family;
   const fontSize = options.fontSize ?? ATLAS_FONT.fontSize;
-  const cellWidth = options.cellWidth ?? 40;
-  const cellHeight = options.cellHeight ?? 64;
+
+  const measuringCtx = canvas.getContext("2d", { willReadFrequently: true });
+  const metrics = measureFont(measuringCtx, family, fontSize);
+
+  const cellWidth = Math.round(metrics.advance);
+  const cellHeight = Math.round(metrics.ascent + metrics.descent);
+  const baseline = metrics.ascent;
 
   const rows = Math.ceil(CHARS.length / COLS);
-  canvas.width = cellWidth * COLS;
-  canvas.height = cellHeight * rows;
+  const pitchX = cellWidth + SHEET_PADDING;
+  const pitchY = cellHeight + SHEET_PADDING;
+  canvas.width = pitchX * COLS + SHEET_PADDING;
+  canvas.height = pitchY * rows + SHEET_PADDING;
 
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.font = `${fontSize}px ${family}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#000000";
 
   const sprites = {};
   CHARS.forEach((ch, i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    ctx.fillText(ch, col * cellWidth + cellWidth / 2, row * cellHeight + cellHeight / 2);
-    sprites[ch] = { x: col * cellWidth, y: row * cellHeight, w: cellWidth, h: cellHeight };
+    const x = SHEET_PADDING + (i % COLS) * pitchX;
+    const y = SHEET_PADDING + Math.floor(i / COLS) * pitchY;
+    ctx.fillText(ch, x, y + baseline);
+    sprites[ch] = { x, y, w: cellWidth, h: cellHeight };
   });
 
   assertRendered(ctx, sprites);
@@ -100,6 +115,8 @@ export function renderAtlas(canvas, options = {}) {
     fontFamily: family,
     cellWidth,
     cellHeight,
+    /** Where the baseline sits inside a cell, as a fraction of its height. */
+    baselineFraction: baseline / cellHeight,
     canvasWidth: canvas.width,
     canvasHeight: canvas.height,
     fontSize,
