@@ -24,10 +24,11 @@ pane's DPI:
       top-right marker    -> its bottom-right corner
       bottom-left marker  -> its top-left corner
       bottom-right marker -> its top-right corner
-Each L sits on a white tile that extends MARGIN beyond it on its outer sides,
-so the marker is black on white whatever the chrome behind it looks like
-(light theme, dark theme, or desktop). On its inner sides the L borders the
-editor pane itself, which plain view keeps white.
+Each L sits on a white tile that extends MARGIN past it on every side facing
+the window chrome, so the L is an isolated black shape on white whatever is
+behind it (light theme, dark theme, or desktop). The side facing the editor
+pane needs no margin: the pane is white already, and the tile stops at the
+pane edge so it never covers text.
 """
 
 import ctypes
@@ -133,25 +134,27 @@ def pane_rect(pane):
     return p.x, p.y, p.x + r.right, p.y + r.bottom
 
 
-# Each corner's window is an s-by-s white tile (s = a + m) holding the L.
-# The L is flush with the tile's pane-side edges, so its corner point lands
-# on the pane corner; the tile's extra m px are the white margin on the outer
-# sides. bars() gives the L's rectangles inside the tile; origin() gives
-# where the tile sits relative to the pane rectangle (left, top, right, bottom).
+# Each corner's window is a white tile, (a + 2m) wide by (a + m) tall, holding
+# the L. Inside it the L's a-by-a bounding box has m px of white on every side
+# that faces the window chrome, so the L never touches the dark tab bar or
+# status bar and stays a separate shape. The pane-facing side gets no margin:
+# the L is flush with it, which is what puts its corner point on the pane
+# corner, and the pane behind it is white anyway. bars() gives the L's two
+# rectangles inside the tile; origin() gives where the tile sits relative to
+# the pane rectangle (left, top, right, bottom).
 def bars(corner, a, t, m):
-    s = a + m
-    ys = (s - t, s) if corner[0] == "t" else (0, t)          # horizontal arm
-    xs = (m, s) if corner[1] == "l" else (0, a)
-    horiz = (xs[0], ys[0], xs[1], ys[1])
-    vx = (m, m + t) if corner[1] == "l" else (a - t, a)       # vertical arm
-    vy = (m, s) if corner[0] == "t" else (0, a)
-    vert = (vx[0], vy[0], vx[1], vy[1])
+    x0 = m                                  # the L's bounding box in the tile
+    y0 = m if corner[0] == "t" else 0
+    hy = (y0 + a - t, y0 + a) if corner[0] == "t" else (y0, y0 + t)
+    horiz = (x0, hy[0], x0 + a, hy[1])      # arm along the pane's top/bottom
+    vx = (x0, x0 + t) if corner[1] == "l" else (x0 + a - t, x0 + a)
+    vert = (vx[0], y0, vx[1], y0 + a)       # arm along the pane's left/right
     return horiz, vert
 
 
 def origin(corner, rect, a, m):
     left, top, right, bottom = rect
-    x = left - m if corner[1] == "l" else right - a
+    x = left - m if corner[1] == "l" else right - a - m
     y = top - a - m if corner[0] == "t" else bottom
     return x, y
 
@@ -189,20 +192,20 @@ class Markers:
         a = max(4, round(ARM * scale))
         t = max(2, round(THICK * scale))
         m = max(2, round(MARGIN * scale))
-        s = a + m
+        w, h = a + 2 * m, a + m
         if self.size != (a, t, m):
             self.size = (a, t, m)
             for c in self.CORNERS:
                 canvas = self.canvases[c]
                 canvas.delete("all")
-                canvas.configure(width=s, height=s)
-                canvas.create_rectangle(0, 0, s, s, fill="white", outline="")
+                canvas.configure(width=w, height=h)
+                canvas.create_rectangle(0, 0, w, h, fill="white", outline="")
                 for x0, y0, x1, y1 in bars(c, a, t, m):
                     canvas.create_rectangle(x0, y0, x1, y1,
                                             fill="black", outline="")
         for c in self.CORNERS:
             x, y = origin(c, rect, a, m)
-            self.windows[c].geometry("%dx%d%+d%+d" % (s, s, x, y))
+            self.windows[c].geometry("%dx%d%+d%+d" % (w, h, x, y))
 
     def hide(self):
         # Moved off-screen rather than withdrawn: showing a window again can
