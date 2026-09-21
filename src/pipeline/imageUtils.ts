@@ -2,26 +2,58 @@ export function luminance(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
-/** Mean luminance of row `y`, restricted to [xStart, xEnd). */
-export function rowLuminance(data: ImageData, y: number, xStart = 0, xEnd = data.width): number {
-  let sum = 0;
-  const count = xEnd - xStart;
+/**
+ * Percentile luminance of row `y`, restricted to [xStart, xEnd).
+ *
+ * A mean would answer "how much ink is in this row", which is a property of the
+ * text. A high percentile answers "what colour is the page here", which is a
+ * property of the window — and that is what a region boundary actually is.
+ */
+export function rowLuminance(
+  data: ImageData,
+  y: number,
+  xStart = 0,
+  xEnd = data.width,
+  percentile = 0.5
+): number {
+  const histogram = new Array(256).fill(0);
   for (let x = xStart; x < xEnd; x++) {
     const i = (y * data.width + x) * 4;
-    sum += luminance(data.data[i], data.data[i + 1], data.data[i + 2]);
+    histogram[clampLevel(luminance(data.data[i], data.data[i + 1], data.data[i + 2]))]++;
   }
-  return sum / count;
+  return percentileOf(histogram, xEnd - xStart, percentile);
 }
 
-/** Mean luminance of column `x`, restricted to [yStart, yEnd). */
-export function colLuminance(data: ImageData, x: number, yStart = 0, yEnd = data.height): number {
-  let sum = 0;
-  const count = yEnd - yStart;
+/** Percentile luminance of column `x`, restricted to [yStart, yEnd). */
+export function colLuminance(
+  data: ImageData,
+  x: number,
+  yStart = 0,
+  yEnd = data.height,
+  percentile = 0.5
+): number {
+  const histogram = new Array(256).fill(0);
   for (let y = yStart; y < yEnd; y++) {
     const i = (y * data.width + x) * 4;
-    sum += luminance(data.data[i], data.data[i + 1], data.data[i + 2]);
+    histogram[clampLevel(luminance(data.data[i], data.data[i + 1], data.data[i + 2]))]++;
   }
-  return sum / count;
+  return percentileOf(histogram, yEnd - yStart, percentile);
+}
+
+function clampLevel(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+/** The luminance level at `percentile` of a 256-bin histogram holding `total` samples. */
+function percentileOf(histogram: number[], total: number, percentile: number): number {
+  if (total <= 0) return 255;
+  const target = Math.max(1, Math.ceil(total * percentile));
+  let seen = 0;
+  for (let level = 0; level < 256; level++) {
+    seen += histogram[level];
+    if (seen >= target) return level;
+  }
+  return 255;
 }
 
 /** Returns the [start, end) index ranges of contiguous `true` runs in `mask`. */

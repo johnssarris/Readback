@@ -12,8 +12,24 @@ export interface MarginBounds {
 /** Minimum row-to-row / column-to-column luminance jump to count as a region boundary. */
 export const BOUNDARY_THRESHOLD = 12;
 
+/**
+ * Where in each row's / column's luminance distribution to read the page colour.
+ *
+ * Text is a minority of any line it sits on, so reading above it — at the bright
+ * end — gives the background the line is drawn on, and ink stops registering as
+ * a boundary at all. It has to clear the ink but stay below any specular
+ * highlight, and 0.75 leaves room on both sides: a column needs only a quarter
+ * of its pixels to be background to read as background, which every column of a
+ * line-number gutter has (digits are shorter than the line box, and not every
+ * line's number reaches every column).
+ */
+const PROFILE_PERCENTILE = 0.75;
+
 /** Boundaries closer together than this (px) are treated as the same edge (anti-aliasing). */
 const MERGE_DISTANCE = 3;
+
+/** Half-width (px) of the window a region edge is measured across. */
+const BOUNDARY_SPAN = 4;
 
 /** Fraction of width/height skipped at each edge before looking for the first real boundary,
  *  to avoid tripping on the rectified window's own outer border. */
@@ -23,18 +39,22 @@ const EDGE_SKIP_FRACTION = 0.01;
  * Locates the editor body (excluding tab bar / status bar / menu bar) via a horizontal
  * color-band scan, then locates the gutter/text-area boundary via a vertical scan within
  * the body. Assumes whole-window framing (see plan: Design decisions).
+ *
+ * Both scans read the page colour behind the text (see PROFILE_PERCENTILE) rather
+ * than the average brightness of each line, so the boundaries they find are the
+ * window's own regions and not the shape of whatever happens to be on screen.
  */
 export function detectMargins(image: ImageData): MarginBounds {
   const { width, height } = image;
 
   const rowLum = new Array(height);
-  for (let y = 0; y < height; y++) rowLum[y] = rowLuminance(image, y);
+  for (let y = 0; y < height; y++) rowLum[y] = rowLuminance(image, y, 0, width, PROFILE_PERCENTILE);
 
   const rowBoundaries = findBoundaries(rowLum);
   const [bodyTopY, bodyBottomY] = tallestBand(rowBoundaries, height);
 
   const colLum = new Array(width);
-  for (let x = 0; x < width; x++) colLum[x] = colLuminance(image, x, bodyTopY, bodyBottomY);
+  for (let x = 0; x < width; x++) colLum[x] = colLuminance(image, x, bodyTopY, bodyBottomY, PROFILE_PERCENTILE);
 
   const colBoundaries = findBoundaries(colLum);
 
@@ -57,9 +77,16 @@ export function detectMargins(image: ImageData): MarginBounds {
 
 /** Finds boundary indices where the 1D luminance profile jumps by more than the threshold. */
 function findBoundaries(profile: number[]): number[] {
-  const diffs: number[] = [0];
-  for (let i = 1; i < profile.length; i++) {
-    diffs.push(Math.abs(profile[i] - profile[i - 1]));
+  // Measured across a span, not between neighbours. A region edge in a photo is
+  // never one pixel wide - lens blur and the rectifying resample spread it over
+  // several - so a step big enough to matter can still be under the threshold
+  // at every single step along the way. Across the span the whole jump shows up,
+  // while a lighting gradient stays far too gradual to register.
+  const diffs: number[] = [];
+  for (let i = 0; i < profile.length; i++) {
+    const lo = profile[Math.max(0, i - BOUNDARY_SPAN)];
+    const hi = profile[Math.min(profile.length - 1, i + BOUNDARY_SPAN)];
+    diffs.push(Math.abs(hi - lo));
   }
 
   const isPeak = diffs.map((d) => d > BOUNDARY_THRESHOLD);
