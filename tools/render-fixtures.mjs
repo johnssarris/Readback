@@ -32,6 +32,9 @@ const CHROME = "#3c3c3c"; // menu/tab/status bars: the theme's, not Scintilla's
 const CASES = [
   { name: "code-19px", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620 },
   { name: "code-26px", source: "sample-code.txt", fontPx: 26, lineHeight: 32, width: 1180, height: 820 },
+  // Narrow enough that the long lines wrap, which is what plain view's WRAP
+  // setting produces: continuation rows carrying text and no line number.
+  { name: "code-wrapped", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 560, height: 820, wrap: true },
 ];
 
 const fontDataUrl = (() => {
@@ -47,6 +50,21 @@ const fontDataUrl = (() => {
 function pageSource() {
   return `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c"></canvas>
 <script>
+/** Word wrap, as an editor does it: break at a space where possible, mid-token when not. */
+function wrapLine(line, columns) {
+  if (line.length <= columns) return [line];
+  const pieces = [];
+  let rest = line;
+  while (rest.length > columns) {
+    let cut = rest.lastIndexOf(" ", columns);
+    if (cut <= 0) cut = columns;
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(rest[cut] === " " ? cut + 1 : cut);
+  }
+  pieces.push(rest);
+  return pieces;
+}
+
 window.render = async (opts) => {
   const face = new FontFace("CascadiaMono", \`url(\${opts.fontDataUrl})\`);
   await face.load();
@@ -90,26 +108,46 @@ window.render = async (opts) => {
   const leading = opts.lineHeight - (ascent + descent);
   const baselineOffset = leading / 2 + ascent;
 
-  const rowYCenters = [];
-  ctx.fillStyle = "${INK}";
+  const columns = Math.floor((c.width - gutterRightEdgeX) / advance);
+
+  // Lay the text out as the editor would: one display row per line, or several
+  // when wrap is on and a line is too wide. Only the first row of a line gets a
+  // number, which is exactly what makes the others continuations.
+  // Lay the text out as the editor would: one display row per line, or several
+  // when wrap is on and a line is too wide. Only the first row of a line gets a
+  // number, which is exactly what makes the others continuations.
+  const rows = [];
   lines.forEach((line, i) => {
+    const pieces = opts.wrap ? wrapLine(line, columns) : [line];
+    pieces.forEach((piece, k) => rows.push({ text: piece, number: k === 0 ? i + 1 : null, line: i }));
+  });
+
+  const rowYCenters = [];
+  const visibleRows = [];
+  ctx.fillStyle = "${INK}";
+  rows.forEach((row, i) => {
     const rowTop = bodyTopY + i * opts.lineHeight;
     if (rowTop + opts.lineHeight > bodyBottomY) return;
     const baseline = rowTop + baselineOffset;
     rowYCenters.push(rowTop + opts.lineHeight / 2);
+    visibleRows.push(row);
 
-    const number = String(i + 1);
-    for (let k = 0; k < number.length; k++) {
-      // Right-aligned against the inner edge of the margin.
-      const x = gutterRightEdgeX - gutterPad - (number.length - k) * advance;
-      ctx.fillText(number[k], x, baseline);
+    if (row.number !== null) {
+      const number = String(row.number);
+      for (let k = 0; k < number.length; k++) {
+        // Right-aligned against the inner edge of the margin.
+        const x = gutterRightEdgeX - gutterPad - (number.length - k) * advance;
+        ctx.fillText(number[k], x, baseline);
+      }
     }
-    for (let col = 0; col < line.length; col++) {
+    for (let col = 0; col < row.text.length; col++) {
       const x = gutterRightEdgeX + col * advance;
       if (x > c.width) break;
-      ctx.fillText(line[col], x, baseline);
+      ctx.fillText(row.text[col], x, baseline);
     }
   });
+
+  const lineCount = visibleRows.length > 0 ? visibleRows[visibleRows.length - 1].line + 1 : 0;
 
   return {
     dataUrl: c.toDataURL("image/png"),
@@ -121,8 +159,13 @@ window.render = async (opts) => {
       gutterRightEdgeX,
       textAreaLeftX: gutterRightEdgeX,
       rowCount: rowYCenters.length,
+      /** Logical lines fully visible: what the recognized text should come back as. */
+      lineCount,
+      /** The rows as laid out, for metrics that score the grid rather than the text. */
+      displayRows: visibleRows.map((r) => r.text),
       rowYCenters,
       fontPx: opts.fontPx,
+      wrapped: Boolean(opts.wrap),
     },
   };
 };

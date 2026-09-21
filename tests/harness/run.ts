@@ -126,8 +126,10 @@ function score(
     rowsDetected: pitch.rowYCenters.length,
     rowsExpected: truth?.rowCount ?? fixture.lines.length,
     rowOffsetCells,
-    inkAccuracy: inkAccuracy(map, fixture.lines),
-    indentAccuracy: indentAccuracy(map, fixture.lines),
+    // Scored against the rows as displayed: with wrap on, a display row is a
+    // piece of a line, and the grid is what these two measure.
+    inkAccuracy: inkAccuracy(map, fixture.rows),
+    indentAccuracy: indentAccuracy(map, fixture.rows),
     cer: null,
   };
 }

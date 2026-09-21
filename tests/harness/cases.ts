@@ -28,8 +28,13 @@ export interface FixtureMeta {
     gutterRightEdgeX: number;
     textAreaLeftX: number;
     rowCount: number;
+    /** Logical lines fully visible in the window; with wrap on, fewer than rowCount. */
+    lineCount?: number;
+    /** The rows as the editor laid them out, for metrics that score the grid rather than the text. */
+    displayRows?: string[];
     rowYCenters: number[];
     fontPx: number;
+    wrapped?: boolean;
   };
 }
 
@@ -39,6 +44,8 @@ export interface Fixture {
   image: ImageData;
   /** Ground-truth lines, trailing newline stripped. */
   lines: string[];
+  /** Ground truth per displayed row. Same as `lines` unless the window wrapped them. */
+  rows: string[];
 }
 
 /** Every fixture in tests/fixtures: a .png plus a .json sidecar naming its ground-truth text. */
@@ -60,8 +67,8 @@ export function loadFixtures(): Fixture[] {
       // Only what the window actually shows can be recognized from it, so a
       // source file longer than the screenful is truncated to what is on screen
       // rather than charged as errors.
-      const lines = text.split("\n");
-      const visible = meta.truth?.rowCount ?? lines.length;
-      return { name, meta, image: loadPng(png), lines: lines.slice(0, visible) };
+      const all = text.split("\n");
+      const lines = all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
+      return { name, meta, image: loadPng(png), lines, rows: meta.truth?.displayRows ?? lines };
     });
 }
