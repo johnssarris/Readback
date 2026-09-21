@@ -108,17 +108,19 @@ export function applyHomography(h: Homography, p: Point): Point {
 }
 
 /**
- * Warps `source` (mapping its `srcCorners` quad to a flat destWidth x destHeight
- * rectangle) into a new canvas, via inverse mapping + bilinear sampling.
+ * Warps pixel data (mapping its `srcCorners` quad to a flat destWidth x destHeight
+ * rectangle), via inverse mapping + bilinear sampling. Returns raw pixels rather
+ * than a canvas, so this runs anywhere — including the metrics harness, which has
+ * no DOM.
  */
-export function warpPerspective(
-  source: CanvasImageSource,
+export function warpImageData(
+  srcData: ImageData,
   sourceWidth: number,
   sourceHeight: number,
   srcCorners: Point[],
   destWidth: number,
   destHeight: number
-): HTMLCanvasElement {
+): { width: number; height: number; data: Uint8ClampedArray } {
   const dstCorners: Point[] = [
     { x: 0, y: 0 },
     { x: destWidth, y: 0 },
@@ -129,6 +131,34 @@ export function warpPerspective(
   const forward = computeHomography(srcCorners, dstCorners);
   const inverse = invertHomography(forward);
 
+  const out = new Uint8ClampedArray(destWidth * destHeight * 4);
+  for (let dy = 0; dy < destHeight; dy++) {
+    for (let dx = 0; dx < destWidth; dx++) {
+      const srcPoint = applyHomography(inverse, { x: dx + 0.5, y: dy + 0.5 });
+      const sample = bilinearSample(srcData, sourceWidth, sourceHeight, srcPoint.x, srcPoint.y);
+      const di = (dy * destWidth + dx) * 4;
+      out[di] = sample[0];
+      out[di + 1] = sample[1];
+      out[di + 2] = sample[2];
+      out[di + 3] = sample[3];
+    }
+  }
+
+  return { width: destWidth, height: destHeight, data: out };
+}
+
+/**
+ * Warps `source` (mapping its `srcCorners` quad to a flat destWidth x destHeight
+ * rectangle) into a new canvas.
+ */
+export function warpPerspective(
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  srcCorners: Point[],
+  destWidth: number,
+  destHeight: number
+): HTMLCanvasElement {
   const srcCanvas = document.createElement("canvas");
   srcCanvas.width = sourceWidth;
   srcCanvas.height = sourceHeight;
@@ -136,24 +166,14 @@ export function warpPerspective(
   srcCtx.drawImage(source, 0, 0, sourceWidth, sourceHeight);
   const srcData = srcCtx.getImageData(0, 0, sourceWidth, sourceHeight);
 
+  const warped = warpImageData(srcData, sourceWidth, sourceHeight, srcCorners, destWidth, destHeight);
+
   const destCanvas = document.createElement("canvas");
   destCanvas.width = destWidth;
   destCanvas.height = destHeight;
   const destCtx = destCanvas.getContext("2d")!;
   const destData = destCtx.createImageData(destWidth, destHeight);
-
-  for (let dy = 0; dy < destHeight; dy++) {
-    for (let dx = 0; dx < destWidth; dx++) {
-      const srcPoint = applyHomography(inverse, { x: dx + 0.5, y: dy + 0.5 });
-      const sample = bilinearSample(srcData, sourceWidth, sourceHeight, srcPoint.x, srcPoint.y);
-      const di = (dy * destWidth + dx) * 4;
-      destData.data[di] = sample[0];
-      destData.data[di + 1] = sample[1];
-      destData.data[di + 2] = sample[2];
-      destData.data[di + 3] = sample[3];
-    }
-  }
-
+  destData.data.set(warped.data);
   destCtx.putImageData(destData, 0, 0);
   return destCanvas;
 }

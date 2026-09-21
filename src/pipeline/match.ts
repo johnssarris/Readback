@@ -1,8 +1,13 @@
 import { luminance, resampleToGray, type Rect } from "./imageUtils";
 
 export interface AtlasManifest {
+  /** The face the templates were rendered from; the editor being photographed has to match it. */
+  font?: string;
+  fontFamily?: string;
   cellWidth: number;
   cellHeight: number;
+  /** Where the baseline sits inside a cell, as a fraction of its height. */
+  baselineFraction?: number;
   canvasWidth: number;
   canvasHeight: number;
   fontSize: number;
@@ -12,6 +17,8 @@ export interface AtlasManifest {
 export interface GlyphAtlas {
   cellWidth: number;
   cellHeight: number;
+  /** Where the baseline sits inside a template cell, as a fraction of its height. */
+  baselineFraction?: number;
   glyphs: Map<string, Float32Array>;
 }
 
@@ -35,6 +42,19 @@ export const MARGIN_THRESHOLD = 0.08;
 
 const CANDIDATE_LIMIT = 5;
 
+/**
+ * Luminance range below which a cell is taken to hold no glyph at all.
+ *
+ * Correlation cannot answer this one. A blank cell is flat, so it correlates
+ * with nothing - every template scores the same, and the winner is whichever
+ * happens to be first. The space template is flat too, so a space can never win
+ * on correlation even against a blank cell. The contrast between a cell's
+ * darkest and brightest pixel settles it instead: any glyph, however light,
+ * puts ink well below the page it sits on, while a blank cell varies only by
+ * sensor noise and whatever bleeds in from its neighbours.
+ */
+export const BLANK_CONTRAST = 48;
+
 /** Builds a runtime glyph atlas (grayscale bitmaps) from the generated sprite sheet + manifest. */
 export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasManifest): GlyphAtlas {
   const glyphs = new Map<string, Float32Array>();
@@ -50,7 +70,12 @@ export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasMa
     glyphs.set(char, gray);
   }
 
-  return { cellWidth: manifest.cellWidth, cellHeight: manifest.cellHeight, glyphs };
+  return {
+    cellWidth: manifest.cellWidth,
+    cellHeight: manifest.cellHeight,
+    baselineFraction: manifest.baselineFraction,
+    glyphs,
+  };
 }
 
 /**
@@ -90,6 +115,17 @@ export function normalizedCrossCorrelation(a: Float32Array, b: Float32Array): nu
   return numerator / denom;
 }
 
+/** Difference between a cell's darkest and brightest pixel. */
+function contrastOf(cell: Float32Array): number {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of cell) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return max - min;
+}
+
 /**
  * Crops+resamples the given cell rect to the atlas's canonical size, then matches it against
  * every glyph via NCC (Stage 5), and applies the confidence-floor/ambiguity-margin flagging
@@ -97,6 +133,10 @@ export function normalizedCrossCorrelation(a: Float32Array, b: Float32Array): nu
  */
 export function matchCell(image: ImageData, cellRect: Rect, atlas: GlyphAtlas): MatchResult {
   const resampled = resampleToGray(image, cellRect, atlas.cellWidth, atlas.cellHeight);
+
+  if (contrastOf(resampled) < BLANK_CONTRAST) {
+    return { char: " ", confidence: 1, candidates: [{ char: " ", score: 1 }], flagged: false };
+  }
 
   const scores: MatchCandidate[] = [];
   for (const [char, glyph] of atlas.glyphs) {

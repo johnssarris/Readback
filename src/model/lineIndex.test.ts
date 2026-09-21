@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildAtlasFromImageData, type AtlasManifest } from "../pipeline/match";
 import type { MarginBounds } from "../pipeline/margins";
 import type { CellPitch } from "../pipeline/calibrate";
-import { buildRows, rowsToText } from "./lineIndex";
+import { buildRows, rowsToText, type LineRow } from "./lineIndex";
 
 const CELL = 4;
 
@@ -69,7 +69,16 @@ function buildAtlasImage(): { image: ImageData; manifest: AtlasManifest } {
 
   return {
     image: { width, height: CELL, data, colorSpace: "srgb" } as ImageData,
-    manifest: { cellWidth: CELL, cellHeight: CELL, canvasWidth: width, canvasHeight: CELL, fontSize: CELL, sprites },
+    manifest: {
+      cellWidth: CELL,
+      cellHeight: CELL,
+      // These stand-in glyphs fill their cell, so their "baseline" is its bottom.
+      baselineFraction: 1,
+      canvasWidth: width,
+      canvasHeight: CELL,
+      fontSize: CELL,
+      sprites,
+    },
   };
 }
 
@@ -119,7 +128,12 @@ describe("buildRows + rowsToText", () => {
       textAreaLeftX: 4,
       textAreaRightX: 12,
     };
-    const pitch: CellPitch = { widthPx: CELL, heightPx: CELL, rowYCenters: [2, 6] };
+    const pitch: CellPitch = {
+      widthPx: CELL,
+      heightPx: CELL,
+      rowYCenters: [2, 6],
+      rowBaselines: [4, 8], // cell bottom: these test glyphs fill their box
+    };
 
     const rows = buildRows(scene, margins, pitch, atlas);
 
@@ -129,5 +143,42 @@ describe("buildRows + rowsToText", () => {
     expect(rows[1].lineNumber).toBe(2);
 
     expect(rowsToText(rows)).toBe("AB\nCD");
+  });
+});
+
+describe("rowsToText", () => {
+  const COLUMNS = 16;
+
+  const row = (text: string, isWrappedContinuation: boolean): LineRow => ({
+    lineNumber: isWrappedContinuation ? NaN : 1,
+    lineNumberConfidence: isWrappedContinuation ? 0 : 1,
+    cells: [...text.padEnd(COLUMNS, " ")].map((char) => ({
+      char,
+      confidence: 1,
+      candidates: [],
+      flagged: false,
+      corrected: false,
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+    })),
+    yRangePx: { top: 0, bottom: 1 },
+    isWrappedContinuation,
+  });
+
+  it("puts a wrapped continuation back on the end of the line it belongs to", () => {
+    // The row above ended before its last column, so the wrap fell on a space.
+    const rows = [row("one long", false), row("line", true), row("next", false)];
+    expect(rowsToText(rows)).toBe("one long line\nnext");
+  });
+
+  it("joins a mid-word break without inventing a space", () => {
+    // The row above used every column, so nothing was broken at.
+    const rows = [row("supercalifragilis", false), row("tic", true)];
+    expect(rowsToText(rows)).toBe("supercalifragilistic");
+  });
+
+  it("starts a line when a continuation has nothing above it", () => {
+    // The top row of a screenful can be a continuation of a line that scrolled
+    // off; there is nothing to join it to, so it stands as its own line.
+    expect(rowsToText([row("tail", true), row("next", false)])).toBe("tail\nnext");
   });
 });

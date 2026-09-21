@@ -46,6 +46,20 @@ out mid-capture; **Later** keeps the current version until the next reload. A
 running app re-checks for a new deploy hourly and whenever it returns to the
 foreground, which matters for a home-screen install that is never really closed.
 
+## The glyph atlas
+
+Recognition matches each character cell against a template, so the app needs a
+sprite sheet of the face the editor is set to. That face is **Cascadia Mono**
+(it ships with Windows 11), bundled under `public/fonts/` so the atlas never
+silently renders in a fallback font.
+
+```sh
+npm run atlas   # renders public/atlas/atlas.png + atlas-manifest.json
+```
+
+`public/tools/atlas-generator.html` does the same in a browser, and can render
+from a locally installed font file instead of the bundled one.
+
 ## Development
 
 ```sh
@@ -53,7 +67,13 @@ npm install
 npm run dev     # http://localhost:5173 — a secure context, so the camera works
 npm test
 npm run build
+
+npm run metrics   # run the fixtures through the pipeline and print the numbers
+npm run fixtures  # re-render the synthetic fixtures
 ```
+
+`tests/fixtures/README.md` explains what a fixture is and how to add a real
+screenshot or phone photo.
 
 To test on a phone against the dev server you still need HTTPS; deploy to Pages
 or put a tunnel (e.g. `cloudflared`, `ngrok`) in front of `npm run dev`.
