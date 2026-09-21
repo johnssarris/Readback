@@ -15,8 +15,8 @@ It follows the window as it moves or resizes, hides while Notepad++ isn't the
 active window, and exits when plain view is toggled off (plain_view.py deletes
 its state file) or Notepad++ closes.
 
-Marker geometry, for whoever writes the detector. Sizes are at 100% display
-scaling and scale with the pane's DPI:
+Marker geometry. Sizes are at 100% display scaling and scale with the
+pane's DPI:
   - each marker is an L made of two black bars, ARM long and THICK wide
   - the top markers sit above the pane, the bottom markers below it
   - each L's corner point, where its two outer edges meet, is the pane corner:
