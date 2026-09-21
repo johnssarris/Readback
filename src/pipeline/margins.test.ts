@@ -84,6 +84,45 @@ function buildSyntheticWindow(options: WindowOptions = {}): ImageData {
   return { width: WIDTH, height: HEIGHT, data, colorSpace: "srgb" } as ImageData;
 }
 
+/** A pane on its own: gutter and text, no chrome anywhere, text stopping short of the bottom. */
+function buildSyntheticPane(): ImageData {
+  const width = 200;
+  const height = 120;
+  const data = new Uint8ClampedArray(width * height * 4);
+
+  const fill = (x0: number, y0: number, x1: number, y1: number, gray: number) => {
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y * width + x) * 4;
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+        data[i + 3] = 255;
+      }
+    }
+  };
+
+  fill(0, 0, width, height, PAGE);
+  fill(0, 0, GUTTER_WIDTH, height, GUTTER_GREY);
+
+  // Rectifying to the pane's corners catches a hair of what is just outside
+  // them - the marker tile's edge, the chrome behind it - along the top and
+  // bottom rows. Two pixels of it is enough to be a boundary.
+  fill(0, 0, width, 2, CHROME);
+  fill(0, height - 2, width, height, CHROME);
+
+  for (let line = 0; line < 5; line++) {
+    const top = 2 + line * LINE_PITCH;
+    fill(GUTTER_WIDTH - 8, top, GUTTER_WIDTH - 2, top + 6, INK);
+    for (let c = 0; c < 12; c++) {
+      if (c % 3 === 2) continue;
+      fill(GUTTER_WIDTH + c * 6, top, GUTTER_WIDTH + c * 6 + 5, top + 6, INK);
+    }
+  }
+
+  return { width, height, data, colorSpace: "srgb" } as ImageData;
+}
+
 describe("detectMargins", () => {
   it("locates the editor body between the tab bar and status bar", () => {
     const margins = detectMargins(buildSyntheticWindow());
@@ -126,6 +165,23 @@ describe("detectMargins", () => {
     // x=30, and ink inside the gutter must not be mistaken for it.
     expect(margins.gutterRightEdgeX).toBeGreaterThanOrEqual(28);
     expect(margins.gutterRightEdgeX).toBeLessThanOrEqual(32);
+  });
+
+  it("keeps the whole image as the body when the markers framed the pane", () => {
+    // No chrome in the picture: the markers cut it away, so the first row of
+    // text starts at the very top and the last ends at the very bottom.
+    const image = buildSyntheticPane();
+
+    const pane = detectMargins(image, "pane");
+    expect(pane.bodyTopY).toBe(0);
+    expect(pane.bodyBottomY).toBe(image.height);
+
+    // The window path reads that hair as the chrome it was written to find,
+    // and the body it settles on is inside the pane - which costs the first
+    // row of text, the one hard against the top edge.
+    const window = detectMargins(image, "window");
+    expect(window.bodyTopY).toBeGreaterThan(0);
+    expect(window.bodyBottomY).toBeLessThan(image.height);
   });
 
   it("cannot find a gutter edge when the gutter is painted the page colour", () => {

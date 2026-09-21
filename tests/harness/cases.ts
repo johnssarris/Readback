@@ -17,7 +17,11 @@ export interface FixtureMeta {
   /** Ground-truth text file, relative to the fixtures directory. */
   text: string;
   note?: string;
-  /** Window corners in image pixels (TL, TR, BR, BL). Required for a photo; a flat capture is its own frame. */
+  /**
+   * Window corners in image pixels (TL, TR, BR, BL). Optional: with corner
+   * markers in the shot they are found rather than given, and a flat capture
+   * with no markers is its own frame.
+   */
   corners?: [Point, Point, Point, Point];
   /** Known geometry, when the fixture was generated rather than captured. */
   truth?: {
@@ -28,6 +32,8 @@ export interface FixtureMeta {
     gutterRightEdgeX: number;
     textAreaLeftX: number;
     rowCount: number;
+    /** The pane the corner markers surround, when the fixture has them. */
+    paneRect?: { left: number; top: number; right: number; bottom: number } | null;
     /** Logical lines fully visible in the window; with wrap on, fewer than rowCount. */
     lineCount?: number;
     /** The rows as the editor laid them out, for metrics that score the grid rather than the text. */

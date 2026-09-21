@@ -4,6 +4,8 @@ plain_view.py: toggle Notepad++ into a plain, high-contrast view and back.
 Runs from a normal Python 3 install and sends standard Windows messages to
 Notepad++. No plugin needed. Run once to turn on, run again to restore.
 
+See tools/README.md for why each setting is what it is.
+
 What "on" does:
   - switches the document to a User Defined Language that supplies the font
   - forces every style to black on white, no bold/italic/underline, fixed size

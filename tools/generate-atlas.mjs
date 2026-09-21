@@ -1,9 +1,9 @@
 /**
  * Builds public/atlas/ headlessly, from the same code the generator page uses.
  *
- * The page (public/tools/atlas-generator.html) is still there for rendering from a
- * locally installed font file; this is the reproducible path, so the atlas the metrics
- * harness measures can always be rebuilt byte for byte.
+ * The page (public/tools/atlas-generator.html) is still there for rendering from
+ * a locally installed font file; this is the reproducible path, and rebuilds the
+ * same bytes every time.
  *
  * Usage: npm run atlas
  */

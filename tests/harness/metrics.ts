@@ -29,6 +29,8 @@ export interface Metrics {
   cer: number | null;
   /** Rows whose line number - or absence of one - was read correctly. */
   numberAccuracy: number | null;
+  /** Mean distance from each detected pane corner to where the markers were drawn. */
+  markerErrorPx: number | null;
 }
 
 /**

@@ -6,11 +6,11 @@
     "cellWidthPx": 11.1328125,
     "cellHeightPx": 23,
     "bodyTopY": 51,
-    "bodyBottomY": 1010,
-    "gutterRightEdgeX": 36,
-    "textAreaLeftX": 36,
-    "rowCount": 41,
-    "lineCount": 40,
+    "bodyBottomY": 1030,
+    "gutterRightEdgeX": 46,
+    "textAreaLeftX": 46,
+    "rowCount": 42,
+    "lineCount": 41,
     "displayRows": [
       "#!/usr/bin/env python3",
       "\"\"\"Ledger reconciliation: 0O1lI are the characters that get misread.\"\"\"",
@@ -52,7 +52,8 @@
       "        else:",
       "            totals[key] = round(credit + debit, 2)",
       "            if verbose:",
-      "                print(f\"  {key}: {credit:>10.2f} {debit:>10.2f} -> {totals[key]:>10.2f}\")"
+      "                print(f\"  {key}: {credit:>10.2f} {debit:>10.2f} -> {totals[key]:>10.2f}\")",
+      "    return totals"
     ],
     "rowNumbers": [
       1,
@@ -95,7 +96,8 @@
       37,
       38,
       39,
-      40
+      40,
+      41
     ],
     "rowYCenters": [
       62.5,
@@ -138,13 +140,19 @@
       913.5,
       936.5,
       959.5,
-      982.5
+      982.5,
+      1005.5
     ],
     "fontPx": 19,
     "wrapped": true,
     "gutterFont": null,
     "gutterAdvancePx": 11.1328125,
-    "paneRect": null,
-    "textAreaRightX": 1920
+    "paneRect": {
+      "left": 10,
+      "top": 51,
+      "right": 1896,
+      "bottom": 1030
+    },
+    "textAreaRightX": 1896
   }
 }

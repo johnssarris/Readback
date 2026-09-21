@@ -1,26 +1,51 @@
 import { estimateAspectRatio, warpPerspective, type Point } from "../pipeline/rectify";
-import { detectMargins, type MarginBounds } from "../pipeline/margins";
+import { detectMarkerQuad } from "../pipeline/markers";
+import { detectMargins, type Framing, type MarginBounds } from "../pipeline/margins";
 import { calibrateCellPitch, type CellPitch } from "../pipeline/calibrate";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
 import { buildRows, rowsToText } from "../model/lineIndex";
 
-const HANDLE_SIZE = 28;
 const MARGIN_FRACTION = 0.12;
+
+/** Side of the loupe, and how much it magnifies. */
+const LOUPE_SIZE = 132;
+const LOUPE_ZOOM = 3;
 
 type Corner = "tl" | "tr" | "br" | "bl";
 const CORNER_ORDER: Corner[] = ["tl", "tr", "br", "bl"];
 
+type Phase = "live" | "adjust";
+
+/**
+ * Framing a capture in two steps: hold the shot still, then say where its
+ * corners are.
+ *
+ * Placing corners on a live preview means the frame that gets read is not the
+ * frame they were placed on - the hand moves between the last adjustment and
+ * the shutter, and the quad ends up describing where the window used to be.
+ * Freezing first makes the two the same frame by construction.
+ */
 export class CaptureController {
   private root: HTMLElement;
   private video: HTMLVideoElement;
+  private frame: HTMLCanvasElement;
   private overlay: HTMLDivElement;
   private handles: Record<Corner, HTMLDivElement> = {} as any;
   private polygon: SVGPolygonElement;
   private stage: HTMLDivElement;
-  private shutterBtn: HTMLButtonElement;
+  private loupe: HTMLCanvasElement;
+  private hint: HTMLParagraphElement;
+  private freezeBtn: HTMLButtonElement;
+  private readBtn: HTMLButtonElement;
+  private retakeBtn: HTMLButtonElement;
   private resultView: HTMLDivElement | null = null;
 
-  /** Corner positions in CSS pixels, relative to `stage`. */
+  private phase: Phase = "live";
+
+  /** Whether the corners on screen came from the markers or from nowhere. */
+  private fromMarkers = false;
+
+  /** Corner positions in frozen-frame pixels, which is what the warp needs. */
   private points: Record<Corner, Point> = {
     tl: { x: 0, y: 0 },
     tr: { x: 0, y: 0 },
@@ -38,10 +63,14 @@ export class CaptureController {
     this.stage.className = "capture-stage";
 
     this.video = document.createElement("video");
-    this.video.className = "capture-video";
+    this.video.className = "capture-view";
     this.video.autoplay = true;
     this.video.playsInline = true;
     this.video.muted = true;
+
+    this.frame = document.createElement("canvas");
+    this.frame.className = "capture-view";
+    this.frame.hidden = true;
 
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS, "svg");
@@ -52,6 +81,7 @@ export class CaptureController {
 
     this.overlay = document.createElement("div");
     this.overlay.className = "capture-overlay";
+    this.overlay.hidden = true;
     this.overlay.appendChild(svg);
 
     for (const corner of CORNER_ORDER) {
@@ -63,22 +93,28 @@ export class CaptureController {
       this.attachDrag(handle, corner);
     }
 
-    this.shutterBtn = document.createElement("button");
-    this.shutterBtn.className = "shutter-btn";
-    this.shutterBtn.textContent = "Capture";
-    this.shutterBtn.addEventListener("click", () => this.capture());
+    this.loupe = document.createElement("canvas");
+    this.loupe.className = "capture-loupe";
+    this.loupe.width = LOUPE_SIZE;
+    this.loupe.height = LOUPE_SIZE;
+    this.loupe.hidden = true;
 
-    const hint = document.createElement("p");
-    hint.className = "capture-hint";
-    hint.textContent = "Align the corners to the outer edge of the Notepad++ window";
+    this.hint = document.createElement("p");
+    this.hint.className = "capture-hint";
 
-    this.stage.appendChild(this.video);
-    this.stage.appendChild(this.overlay);
-    this.root.appendChild(hint);
-    this.root.appendChild(this.stage);
-    this.root.appendChild(this.shutterBtn);
+    this.freezeBtn = button("Freeze", "shutter-btn", () => this.freeze());
+    this.readBtn = button("Read", "shutter-btn", () => this.read());
+    this.retakeBtn = button("Retake", "shutter-btn secondary", () => this.retake());
+
+    const controls = document.createElement("div");
+    controls.className = "capture-controls";
+    controls.append(this.freezeBtn, this.retakeBtn, this.readBtn);
+
+    this.stage.append(this.video, this.frame, this.overlay, this.loupe);
+    this.root.append(this.hint, this.stage, controls);
 
     window.addEventListener("resize", () => this.layoutHandles());
+    this.setPhase("live");
   }
 
   async start(): Promise<void> {
@@ -90,8 +126,8 @@ export class CaptureController {
     await new Promise<void>((resolve) => {
       this.video.onloadedmetadata = () => resolve();
     });
-    this.resetCornersToDefault();
-    this.layoutHandles();
+    await this.video.play().catch(() => undefined);
+    this.setPhase("live");
   }
 
   stop(): void {
@@ -99,34 +135,113 @@ export class CaptureController {
     this.stream = null;
   }
 
-  private resetCornersToDefault(): void {
+  private setPhase(phase: Phase): void {
+    this.phase = phase;
+    const adjusting = phase === "adjust";
+
+    this.video.hidden = adjusting;
+    this.frame.hidden = !adjusting;
+    this.overlay.hidden = !adjusting;
+    this.freezeBtn.hidden = adjusting;
+    this.readBtn.hidden = !adjusting;
+    this.retakeBtn.hidden = !adjusting;
+    this.loupe.hidden = true;
+
+    if (!adjusting) {
+      this.hint.textContent = "Fill the frame with the window, hold steady, then freeze";
+    } else if (this.fromMarkers) {
+      this.hint.textContent = "Corners found. Nudge any that look wrong, then read";
+    } else {
+      this.hint.textContent = "No corner markers found. Drag each corner onto the pane";
+    }
+  }
+
+  /** Takes the still everything from here on refers to. */
+  private freeze(): void {
+    const width = this.video.videoWidth;
+    const height = this.video.videoHeight;
+    if (width === 0 || height === 0) return;
+
+    this.frame.width = width;
+    this.frame.height = height;
+    const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(this.video, 0, 0);
+
+    // The markers, if they are in the shot, know where the pane is better than
+    // a fingertip does. Failing that, a box to drag into place.
+    const quad = detectMarkerQuad(ctx.getImageData(0, 0, width, height));
+    this.fromMarkers = quad !== null;
+
+    if (quad) {
+      const [tl, tr, br, bl] = quad.corners;
+      this.points = { tl, tr, br, bl };
+    } else {
+      const mx = width * MARGIN_FRACTION;
+      const my = height * MARGIN_FRACTION;
+      this.points = {
+        tl: { x: mx, y: my },
+        tr: { x: width - mx, y: my },
+        br: { x: width - mx, y: height - my },
+        bl: { x: mx, y: height - my },
+      };
+    }
+
+    this.setPhase("adjust");
+    this.layoutHandles();
+  }
+
+  private retake(): void {
+    this.setPhase("live");
+  }
+
+  /**
+   * How the frozen frame is laid out inside the stage.
+   *
+   * The canvas is letterboxed to fit (object-fit: contain), so a point on it is
+   * somewhere else on screen, and the two have to be converted between for
+   * every drag and every magnified crop.
+   */
+  private fit(): { scale: number; offsetX: number; offsetY: number } {
     const rect = this.stage.getBoundingClientRect();
-    const mx = rect.width * MARGIN_FRACTION;
-    const my = rect.height * MARGIN_FRACTION;
-    this.points = {
-      tl: { x: mx, y: my },
-      tr: { x: rect.width - mx, y: my },
-      br: { x: rect.width - mx, y: rect.height - my },
-      bl: { x: mx, y: rect.height - my },
+    const scale = Math.min(rect.width / this.frame.width, rect.height / this.frame.height);
+    return {
+      scale,
+      offsetX: (rect.width - this.frame.width * scale) / 2,
+      offsetY: (rect.height - this.frame.height * scale) / 2,
+    };
+  }
+
+  private toStage(p: Point): Point {
+    const { scale, offsetX, offsetY } = this.fit();
+    return { x: p.x * scale + offsetX, y: p.y * scale + offsetY };
+  }
+
+  private toFrame(p: Point): Point {
+    const { scale, offsetX, offsetY } = this.fit();
+    return {
+      x: clamp((p.x - offsetX) / scale, 0, this.frame.width),
+      y: clamp((p.y - offsetY) / scale, 0, this.frame.height),
     };
   }
 
   private attachDrag(handle: HTMLDivElement, corner: Corner): void {
     handle.addEventListener("pointerdown", (e) => {
+      if (this.phase !== "adjust") return;
       e.preventDefault();
       handle.setPointerCapture(e.pointerId);
+      this.showLoupe(this.points[corner]);
 
       const move = (ev: PointerEvent) => {
         const rect = this.stage.getBoundingClientRect();
-        const x = clamp(ev.clientX - rect.left, 0, rect.width);
-        const y = clamp(ev.clientY - rect.top, 0, rect.height);
-        this.points[corner] = { x, y };
+        this.points[corner] = this.toFrame({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
         this.layoutHandles();
+        this.showLoupe(this.points[corner]);
       };
 
       const up = () => {
         handle.removeEventListener("pointermove", move);
         handle.removeEventListener("pointerup", up);
+        this.loupe.hidden = true;
       };
 
       handle.addEventListener("pointermove", move);
@@ -134,51 +249,71 @@ export class CaptureController {
     });
   }
 
-  private layoutHandles(): void {
-    for (const corner of CORNER_ORDER) {
-      const p = this.points[corner];
-      const handle = this.handles[corner];
-      handle.style.left = `${p.x - HANDLE_SIZE / 2}px`;
-      handle.style.top = `${p.y - HANDLE_SIZE / 2}px`;
-    }
-    const orderedPoints = CORNER_ORDER.map((c) => this.points[c]);
-    this.polygon.setAttribute("points", orderedPoints.map((p) => `${p.x},${p.y}`).join(" "));
-  }
+  /**
+   * Magnified view of what is under the corner being dragged.
+   *
+   * A fingertip covers far more of the screen than the corner it is placing, so
+   * the loupe sits in a corner of the stage well away from the hand rather than
+   * following the finger, where it would be underneath it or off the top edge.
+   */
+  private showLoupe(at: Point): void {
+    const ctx = this.loupe.getContext("2d")!;
+    const span = LOUPE_SIZE / LOUPE_ZOOM;
 
-  /** Maps a stage-space (CSS pixel) point into native video-frame pixel coordinates. */
-  private toVideoSpace(p: Point): Point {
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.frame, at.x - span / 2, at.y - span / 2, span, span, 0, 0, LOUPE_SIZE, LOUPE_SIZE);
+
+    // Crosshair on the exact point, since the loupe is what it is being placed by.
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(LOUPE_SIZE / 2, 0);
+    ctx.lineTo(LOUPE_SIZE / 2, LOUPE_SIZE);
+    ctx.moveTo(0, LOUPE_SIZE / 2);
+    ctx.lineTo(LOUPE_SIZE, LOUPE_SIZE / 2);
+    ctx.stroke();
+
+    const stagePoint = this.toStage(at);
     const rect = this.stage.getBoundingClientRect();
-    const vw = this.video.videoWidth;
-    const vh = this.video.videoHeight;
-    const scale = Math.min(rect.width / vw, rect.height / vh);
-    const renderedW = vw * scale;
-    const renderedH = vh * scale;
-    const offsetX = (rect.width - renderedW) / 2;
-    const offsetY = (rect.height - renderedH) / 2;
-    return {
-      x: (p.x - offsetX) / scale,
-      y: (p.y - offsetY) / scale,
-    };
+    this.loupe.classList.toggle("right", stagePoint.x < rect.width / 2);
+    this.loupe.hidden = false;
   }
 
-  private capture(): void {
-    const vw = this.video.videoWidth;
-    const vh = this.video.videoHeight;
+  private layoutHandles(): void {
+    if (this.phase !== "adjust") return;
 
-    const srcCorners = CORNER_ORDER.map((c) => this.toVideoSpace(this.points[c]));
+    for (const corner of CORNER_ORDER) {
+      const p = this.toStage(this.points[corner]);
+      const handle = this.handles[corner];
+      handle.style.left = `${p.x}px`;
+      handle.style.top = `${p.y}px`;
+    }
+    this.polygon.setAttribute(
+      "points",
+      CORNER_ORDER.map((c) => {
+        const p = this.toStage(this.points[c]);
+        return `${p.x},${p.y}`;
+      }).join(" ")
+    );
+  }
+
+  private read(): void {
+    const srcCorners = CORNER_ORDER.map((c) => this.points[c]);
     const aspect = estimateAspectRatio(srcCorners);
 
     const destWidth = 1600;
     const destHeight = Math.round(destWidth / aspect);
 
-    const rectified = warpPerspective(this.video, vw, vh, srcCorners, destWidth, destHeight);
-    this.showResult(rectified);
+    const rectified = warpPerspective(this.frame, this.frame.width, this.frame.height, srcCorners, destWidth, destHeight);
+    this.showResult(rectified, this.fromMarkers ? "pane" : "window");
   }
 
-  private showResult(canvas: HTMLCanvasElement): void {
+  private showResult(canvas: HTMLCanvasElement, framing: Framing): void {
     this.stop();
 
-    const pipelineResult = this.runDebugPipeline(canvas);
+    const pipelineResult = this.runDebugPipeline(canvas, framing);
 
     this.resultView = document.createElement("div");
     this.resultView.className = "result-view";
@@ -193,16 +328,9 @@ export class CaptureController {
     recognized.className = "recognized-text";
     recognized.textContent = "Loading glyph atlas…";
 
-    const retakeBtn = document.createElement("button");
-    retakeBtn.className = "retake-btn";
-    retakeBtn.textContent = "Retake";
-    retakeBtn.addEventListener("click", () => this.retake());
+    const retakeBtn = button("Retake", "retake-btn", () => this.restart());
 
-    this.resultView.appendChild(canvas);
-    this.resultView.appendChild(info);
-    this.resultView.appendChild(recognized);
-    this.resultView.appendChild(retakeBtn);
-
+    this.resultView.append(canvas, info, recognized, retakeBtn);
     this.root.innerHTML = "";
     this.root.appendChild(this.resultView);
 
@@ -219,7 +347,7 @@ export class CaptureController {
    * checked visually against a real photo. Returns a short text summary plus the detected
    * bounds/pitch for the M3 recognition pass below.
    */
-  private runDebugPipeline(canvas: HTMLCanvasElement): {
+  private runDebugPipeline(canvas: HTMLCanvasElement, framing: Framing): {
     summary: string;
     margins: MarginBounds | null;
     pitch: CellPitch | null;
@@ -232,7 +360,7 @@ export class CaptureController {
     let pitch: CellPitch | null = null;
 
     try {
-      margins = detectMargins(imageData);
+      margins = detectMargins(imageData, framing);
       lines.push(`body: y ${margins.bodyTopY}–${margins.bodyBottomY}`);
       lines.push(`gutter edge: x=${margins.gutterRightEdgeX}, text right: x=${margins.textAreaRightX}`);
 
@@ -265,10 +393,10 @@ export class CaptureController {
         ctx.beginPath();
         for (const yCenter of pitch.rowYCenters) {
           const top = yCenter - pitch.heightPx / 2;
-          ctx.moveTo(margins.textAreaLeftX, top);
+          ctx.moveTo(pitch.columnOriginX, top);
           ctx.lineTo(margins.textAreaRightX, top);
         }
-        for (let x = margins.textAreaLeftX; x < margins.textAreaRightX; x += pitch.widthPx) {
+        for (let x = pitch.columnOriginX; x < margins.textAreaRightX; x += pitch.widthPx) {
           ctx.moveTo(x, margins.bodyTopY);
           ctx.lineTo(x, margins.bodyBottomY);
         }
@@ -299,7 +427,7 @@ export class CaptureController {
     const atlas = await loadAtlasAssets();
     if (!atlas) {
       target.textContent =
-        "No glyph atlas found at /atlas/. Generate one via /tools/atlas-generator.html and place atlas.png + atlas-manifest.json under public/atlas/.";
+        "No glyph atlas found at /atlas/. Generate one with npm run atlas and place atlas.png + atlas-manifest.json under public/atlas/.";
       return;
     }
 
@@ -333,11 +461,18 @@ export class CaptureController {
     console.log("Recognized text:\n" + rowsToText(rows));
   }
 
-  private retake(): void {
-    const root = this.root;
-    const controller = new CaptureController(root);
+  private restart(): void {
+    const controller = new CaptureController(this.root);
     controller.start();
   }
+}
+
+function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
+  const el = document.createElement("button");
+  el.className = className;
+  el.textContent = label;
+  el.addEventListener("click", onClick);
+  return el;
 }
 
 function clamp(v: number, lo: number, hi: number): number {

@@ -1,17 +1,11 @@
 /**
- * Renders stand-in "Notepad++ screenshots" for the pipeline metrics harness.
+ * Draws stand-in Notepad++ windows into tests/fixtures/, each with a sidecar
+ * describing exactly what was drawn and where.
  *
- * These are a placeholder for the real thing. Chromium and the canvas-rendered
- * glyph atlas share a rasterizer, so a Chromium-rendered fixture flatters a
- * canvas atlas and can't be used to compare atlas sources. Every fixture this
- * produces is marked `"kind": "render"`, and the harness reports its numbers as
- * geometry-only: margins, cell pitch, row detection, blank-cell segmentation.
+ * See tools/README.md for what these are for and what they can and cannot
+ * stand in for; tests/fixtures/README.md describes the sidecar format.
  *
- * Real Notepad++ screenshots (kind "screenshot") and phone photos (kind "photo")
- * drop into tests/fixtures/ alongside these and are measured by the same code.
- * See tests/fixtures/README.md.
- *
- * Usage: node tools/render-fixtures.mjs
+ * Usage: npm run fixtures
  */
 
 import { chromium } from "playwright";
@@ -23,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
 const fixtures = join(repo, "tests", "fixtures");
 
-/** Plain view's own settings, mirrored here so a fixture looks like what the script produces. */
+/** plain_view.py's own settings, mirrored here so a window looks like what that script produces. */
 const PAPER = "#ffffff";
 const INK = "#000000";
 const GUTTER = "#e0e0e0"; // plain_view.py's GUTTER default
@@ -32,30 +26,35 @@ const CHROME = "#3c3c3c"; // menu/tab/status bars: the theme's, not Scintilla's
 const CASES = [
   { name: "code-19px", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620 },
   { name: "code-26px", source: "sample-code.txt", fontPx: 26, lineHeight: 32, width: 1180, height: 820 },
-  // Narrow enough that the long lines wrap, which is what plain view's WRAP
-  // setting produces: continuation rows carrying text and no line number.
+  // Narrow enough that the long lines wrap, as plain_view.py's WRAP setting
+  // makes them: continuation rows carrying text and no line number.
   { name: "code-wrapped", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 560, height: 820, wrap: true },
-  // A maximised window on a 1080p screen, which is how the editor is actually
-  // going to be sitting: wider than the 1600px the capture is rectified to, so
-  // the pipeline shrinks it rather than blowing it up. Different text as well -
-  // deep indentation, lines long enough to wrap even this wide, 0O1lI, dense
+  // A maximised window on a 1080p screen. Different text as well: deep
+  // indentation, lines long enough to wrap even this wide, 0O1lI, dense
   // punctuation, blank lines.
   { name: "varied-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1040, wrap: true },
   // The line number margin left in another face, as it is on a machine where
   // that step of the setup was skipped. Its advance width is not the text's.
   { name: "gutter-courier", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "courier-prime" },
   { name: "gutter-inconsolata", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "inconsolata" },
+  // With corner markers around the pane, as overlay.py draws them. The pane is
+  // inset from the window edge and has a scrollbar beside it, both of which the
+  // markers exclude.
+  { name: "markers-900", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 700, markers: true },
+  { name: "markers-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1080, wrap: true, markers: true },
 ];
 
 const dataUrl = (path) => `data:font/woff2;base64,${readFileSync(path).toString("base64")}`;
 
+/** The corner markers' geometry, from the one definition of it. */
+const MARKERS = JSON.parse(readFileSync(join(repo, "tools", "marker-geometry.json"), "utf8"));
+
 const fontDataUrl = dataUrl(join(repo, "public", "fonts", "cascadia-mono-latin-400-normal.woff2"));
 
 /**
- * Stand-ins for a gutter left in whatever font the theme had, on a machine
- * where the line number margin was never set to the text's face. Courier New
- * and Consolas can't be redistributed; these are the OFL faces closest to them
- * in shape and in advance width, which is what the pipeline has to cope with.
+ * A gutter left in whatever font the theme had, on a machine where the line
+ * number margin was never set to the text's face. Courier New and Consolas
+ * cannot be redistributed; these are the OFL faces closest to them.
  */
 const GUTTER_FONTS = {
   "courier-prime": join(repo, "node_modules", "@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2"),
@@ -70,6 +69,40 @@ const GUTTER_FONTS = {
 function pageSource() {
   return `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c"></canvas>
 <script>
+/**
+ * The four corner markers, laid out exactly as overlay.py lays them out: an L
+ * of two arms on a white tile, its outer corner on the pane's corner, sitting
+ * outside the pane so it covers no text. The tile has a margin on the sides
+ * facing the chrome and none on the side facing the pane.
+ */
+function drawCornerMarkers(ctx, pane, mk) {
+  const a = mk.armPx;
+  const t = mk.thickPx;
+  const m = mk.marginPx;
+  const tileW = a + 2 * m;
+  const tileH = a + m;
+
+  for (const corner of ["tl", "tr", "bl", "br"]) {
+    const top = corner[0] === "t";
+    const left = corner[1] === "l";
+
+    const originX = left ? pane.left - m : pane.right - a - m;
+    const originY = top ? pane.top - a - m : pane.bottom;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(originX, originY, tileW, tileH);
+
+    const x0 = m;
+    const y0 = top ? m : 0;
+    const armY = top ? y0 + a - t : y0;
+    const armX = left ? x0 : x0 + a - t;
+
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(originX + x0, originY + armY, a, t);
+    ctx.fillRect(originX + armX, originY + y0, t, a);
+  }
+}
+
 /** Word wrap, as an editor does it: break at a space where possible, mid-token when not. */
 function wrapLine(line, columns) {
   if (line.length <= columns) return [line];
@@ -123,25 +156,38 @@ window.render = async (opts) => {
   const digits = String(lines.length).length;
   // Notepad++ sizes the line number margin to fit the widest number, plus padding.
   const gutterPad = Math.round(gutterAdvance * 0.6);
-  const gutterRightEdgeX = Math.round(gutterPad * 2 + digits * gutterAdvance);
+  const gutterWidth = Math.round(gutterPad * 2 + digits * gutterAdvance);
 
-  const chromeTop = Math.round(opts.lineHeight * 2.2);   // menu bar + tab bar
-  const chromeBottom = Math.round(opts.lineHeight * 1.3); // status bar
+  const mk = opts.markerGeometry;
+  const drawMarkers = Boolean(opts.markers);
+
+  // A marker reaches ARM + MARGIN above the pane and the same below it, so the
+  // chrome has to be at least that deep for one to sit over it.
+  const minChrome = drawMarkers ? mk.armPx + mk.marginPx + 4 : 0;
+  const chromeTop = Math.max(minChrome, Math.round(opts.lineHeight * 2.2));   // menu bar + tab bar
+  const chromeBottom = Math.max(minChrome, Math.round(opts.lineHeight * 1.3)); // status bar
+
+  // The pane is the gutter and the text, inset from the window's own edge and
+  // with the scrollbar outside it.
+  const paneLeft = drawMarkers ? mk.marginPx + 4 : 0;
+  const scrollbar = drawMarkers ? 14 : 0;
+  const paneRight = c.width - scrollbar - (drawMarkers ? mk.marginPx + 4 : 0);
   const bodyTopY = chromeTop;
   const bodyBottomY = opts.height - chromeBottom;
 
   ctx.fillStyle = "${CHROME}";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = "${PAPER}";
-  ctx.fillRect(0, bodyTopY, c.width, bodyBottomY - bodyTopY);
+  ctx.fillRect(paneLeft, bodyTopY, paneRight - paneLeft, bodyBottomY - bodyTopY);
   ctx.fillStyle = "${GUTTER}";
-  ctx.fillRect(0, bodyTopY, gutterRightEdgeX, bodyBottomY - bodyTopY);
+  ctx.fillRect(paneLeft, bodyTopY, gutterWidth, bodyBottomY - bodyTopY);
 
   // Baseline placement inside the line box, same for gutter and text.
   const leading = opts.lineHeight - (ascent + descent);
   const baselineOffset = leading / 2 + ascent;
 
-  const columns = Math.floor((c.width - gutterRightEdgeX) / advance);
+  const gutterRightEdgeX = paneLeft + gutterWidth;
+  const columns = Math.floor((paneRight - gutterRightEdgeX) / advance);
 
   // Lay the text out as the editor would: one display row per line, or several
   // when wrap is on and a line is too wide. Only the first row of a line gets a
@@ -177,10 +223,15 @@ window.render = async (opts) => {
     }
     for (let col = 0; col < row.text.length; col++) {
       const x = gutterRightEdgeX + col * advance;
-      if (x > c.width) break;
+      if (x + advance > paneRight) break;
       ctx.fillText(row.text[col], x, baseline);
     }
   });
+
+  const paneRect = { left: paneLeft, top: bodyTopY, right: paneRight, bottom: bodyBottomY };
+  if (drawMarkers) {
+    drawCornerMarkers(ctx, paneRect, mk);
+  }
 
   const lineCount = visibleRows.length > 0 ? visibleRows[visibleRows.length - 1].line + 1 : 0;
 
@@ -205,6 +256,9 @@ window.render = async (opts) => {
       wrapped: Boolean(opts.wrap),
       gutterFont: opts.gutterFont ?? null,
       gutterAdvancePx: gutterAdvance,
+      /** The pane the markers surround: the gutter and the text, without the scrollbar. */
+      paneRect: drawMarkers ? paneRect : null,
+      textAreaRightX: paneRight,
     },
   };
 };
@@ -228,6 +282,7 @@ for (const spec of CASES) {
       text,
       fontDataUrl,
       gutterFontDataUrl: spec.gutterFont ? dataUrl(GUTTER_FONTS[spec.gutterFont]) : null,
+      markerGeometry: MARKERS,
     }
   );
 
@@ -240,7 +295,7 @@ for (const spec of CASES) {
         kind: "render",
         text: spec.source,
         note:
-          "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison." +
+          "Chromium-rendered stand-in. Geometry only - not valid for comparing glyph rendering." +
           (spec.gutterFont ? ` Line number margin in ${spec.gutterFont}, not the text's face.` : ""),
         truth: result.truth,
       },
