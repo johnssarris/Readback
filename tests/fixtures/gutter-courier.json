@@ -1,7 +1,7 @@
 {
   "kind": "render",
   "text": "sample-code.txt",
-  "note": "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison. Line number margin in courier-prime, not the text's face.",
+  "note": "Chromium-rendered stand-in. Geometry only - not valid for comparing glyph rendering. Line number margin in courier-prime, not the text's face.",
   "truth": {
     "cellWidthPx": 11.1328125,
     "cellHeightPx": 23,

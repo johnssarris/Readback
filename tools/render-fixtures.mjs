@@ -1,17 +1,11 @@
 /**
- * Renders stand-in "Notepad++ screenshots" for the pipeline metrics harness.
+ * Draws stand-in Notepad++ windows into tests/fixtures/, each with a sidecar
+ * describing exactly what was drawn and where.
  *
- * These are a placeholder for the real thing. Chromium and the canvas-rendered
- * glyph atlas share a rasterizer, so a Chromium-rendered fixture flatters a
- * canvas atlas and can't be used to compare atlas sources. Every fixture this
- * produces is marked `"kind": "render"`, and the harness reports its numbers as
- * geometry-only: margins, cell pitch, row detection, blank-cell segmentation.
+ * See tools/README.md for what these are for and what they can and cannot
+ * stand in for; tests/fixtures/README.md describes the sidecar format.
  *
- * Real Notepad++ screenshots (kind "screenshot") and phone photos (kind "photo")
- * drop into tests/fixtures/ alongside these and are measured by the same code.
- * See tests/fixtures/README.md.
- *
- * Usage: node tools/render-fixtures.mjs
+ * Usage: npm run fixtures
  */
 
 import { chromium } from "playwright";
@@ -23,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
 const fixtures = join(repo, "tests", "fixtures");
 
-/** Plain view's own settings, mirrored here so a fixture looks like what the script produces. */
+/** plain_view.py's own settings, mirrored here so a window looks like what that script produces. */
 const PAPER = "#ffffff";
 const INK = "#000000";
 const GUTTER = "#e0e0e0"; // plain_view.py's GUTTER default
@@ -32,13 +26,11 @@ const CHROME = "#3c3c3c"; // menu/tab/status bars: the theme's, not Scintilla's
 const CASES = [
   { name: "code-19px", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620 },
   { name: "code-26px", source: "sample-code.txt", fontPx: 26, lineHeight: 32, width: 1180, height: 820 },
-  // Narrow enough that the long lines wrap, which is what plain view's WRAP
-  // setting produces: continuation rows carrying text and no line number.
+  // Narrow enough that the long lines wrap, as plain_view.py's WRAP setting
+  // makes them: continuation rows carrying text and no line number.
   { name: "code-wrapped", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 560, height: 820, wrap: true },
-  // A maximised window on a 1080p screen, which is how the editor is actually
-  // going to be sitting: wider than the 1600px the capture is rectified to, so
-  // the pipeline shrinks it rather than blowing it up. Different text as well -
-  // deep indentation, lines long enough to wrap even this wide, 0O1lI, dense
+  // A maximised window on a 1080p screen. Different text as well: deep
+  // indentation, lines long enough to wrap even this wide, 0O1lI, dense
   // punctuation, blank lines.
   { name: "varied-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1040, wrap: true },
   // The line number margin left in another face, as it is on a machine where
@@ -52,10 +44,9 @@ const dataUrl = (path) => `data:font/woff2;base64,${readFileSync(path).toString(
 const fontDataUrl = dataUrl(join(repo, "public", "fonts", "cascadia-mono-latin-400-normal.woff2"));
 
 /**
- * Stand-ins for a gutter left in whatever font the theme had, on a machine
- * where the line number margin was never set to the text's face. Courier New
- * and Consolas can't be redistributed; these are the OFL faces closest to them
- * in shape and in advance width, which is what the pipeline has to cope with.
+ * A gutter left in whatever font the theme had, on a machine where the line
+ * number margin was never set to the text's face. Courier New and Consolas
+ * cannot be redistributed; these are the OFL faces closest to them.
  */
 const GUTTER_FONTS = {
   "courier-prime": join(repo, "node_modules", "@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2"),
@@ -240,7 +231,7 @@ for (const spec of CASES) {
         kind: "render",
         text: spec.source,
         note:
-          "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison." +
+          "Chromium-rendered stand-in. Geometry only - not valid for comparing glyph rendering." +
           (spec.gutterFont ? ` Line number margin in ${spec.gutterFont}, not the text's face.` : ""),
         truth: result.truth,
       },
