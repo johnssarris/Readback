@@ -115,9 +115,32 @@ function plausiblePane(assignment: Record<Corner, Blob>, width: number, height: 
   const br = centre(assignment.br);
   const bl = centre(assignment.bl);
 
+  // Convex, in order. Four markers around a pane always are, at any angle the
+  // pane can be photographed from - where four unrelated pieces of L-shaped ink
+  // are not. Ordering by position would say the same thing, but it is not
+  // available here: this has to hold for the reading the shapes gave when the
+  // positions were too close to call.
+  if (!isConvex([tl, tr, br, bl])) return false;
+
   const spanX = Math.max(Math.abs(tr.x - tl.x), Math.abs(br.x - bl.x));
   const spanY = Math.max(Math.abs(bl.y - tl.y), Math.abs(br.y - tr.y));
   return spanX >= width * MIN_PANE_FRACTION && spanY >= height * MIN_PANE_FRACTION;
+}
+
+/** Whether a quadrilateral turns the same way at every corner. */
+function isConvex(quad: Point[]): boolean {
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i];
+    const b = quad[(i + 1) % 4];
+    const c = quad[(i + 2) % 4];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (cross === 0) continue;
+    const turn = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = turn;
+    else if (turn !== sign) return false;
+  }
+  return sign !== 0;
 }
 
 /** Every dark blob in the frame shaped like one of the markers. */
