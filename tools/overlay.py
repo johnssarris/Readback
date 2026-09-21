@@ -24,8 +24,10 @@ scaling and scale with the pane's DPI:
       top-right marker    -> its bottom-right corner
       bottom-left marker  -> its top-left corner
       bottom-right marker -> its top-right corner
-Assumes light window chrome. On a dark theme, black markers would need a white
-outline to stand out.
+Each L sits on a white tile that extends MARGIN beyond it on its outer sides,
+so the marker is black on white whatever the chrome behind it looks like
+(light theme, dark theme, or desktop). On its inner sides the L borders the
+editor pane itself, which plain view keeps white.
 """
 
 import ctypes
@@ -60,6 +62,7 @@ import tkinter as tk  # noqa: E402  (must come after DPI awareness)
 # ---- Settings to tweak ----
 ARM = 40            # length of each L arm, px at 100% scaling
 THICK = 8           # thickness of each arm, px at 100% scaling
+MARGIN = 6          # white border outside the L, px at 100% scaling
 POLL_MS = 150       # how often to check where the pane is
 KEY = "#ff00ff"     # transparent colour: pixels in this colour are see-through
 STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
@@ -130,18 +133,26 @@ def pane_rect(pane):
     return p.x, p.y, p.x + r.right, p.y + r.bottom
 
 
-# For each corner: which bars to draw inside an a-by-a window, and where
-# that window sits relative to the pane rectangle (left, top, right, bottom).
-def bars(corner, a, t):
-    horiz = (0, a - t, a, a) if corner[0] == "t" else (0, 0, a, t)
-    vert = (0, 0, t, a) if corner[1] == "l" else (a - t, 0, a, a)
+# Each corner's window is an s-by-s white tile (s = a + m) holding the L.
+# The L is flush with the tile's pane-side edges, so its corner point lands
+# on the pane corner; the tile's extra m px are the white margin on the outer
+# sides. bars() gives the L's rectangles inside the tile; origin() gives
+# where the tile sits relative to the pane rectangle (left, top, right, bottom).
+def bars(corner, a, t, m):
+    s = a + m
+    ys = (s - t, s) if corner[0] == "t" else (0, t)          # horizontal arm
+    xs = (m, s) if corner[1] == "l" else (0, a)
+    horiz = (xs[0], ys[0], xs[1], ys[1])
+    vx = (m, m + t) if corner[1] == "l" else (a - t, a)       # vertical arm
+    vy = (m, s) if corner[0] == "t" else (0, a)
+    vert = (vx[0], vy[0], vx[1], vy[1])
     return horiz, vert
 
 
-def origin(corner, rect, a):
+def origin(corner, rect, a, m):
     left, top, right, bottom = rect
-    x = left if corner[1] == "l" else right - a
-    y = top - a if corner[0] == "t" else bottom
+    x = left - m if corner[1] == "l" else right - a
+    y = top - a - m if corner[0] == "t" else bottom
     return x, y
 
 
@@ -177,18 +188,21 @@ class Markers:
     def place(self, rect, scale):
         a = max(4, round(ARM * scale))
         t = max(2, round(THICK * scale))
-        if self.size != (a, t):
-            self.size = (a, t)
+        m = max(2, round(MARGIN * scale))
+        s = a + m
+        if self.size != (a, t, m):
+            self.size = (a, t, m)
             for c in self.CORNERS:
                 canvas = self.canvases[c]
                 canvas.delete("all")
-                canvas.configure(width=a, height=a)
-                for x0, y0, x1, y1 in bars(c, a, t):
+                canvas.configure(width=s, height=s)
+                canvas.create_rectangle(0, 0, s, s, fill="white", outline="")
+                for x0, y0, x1, y1 in bars(c, a, t, m):
                     canvas.create_rectangle(x0, y0, x1, y1,
                                             fill="black", outline="")
         for c in self.CORNERS:
-            x, y = origin(c, rect, a)
-            self.windows[c].geometry("%dx%d%+d%+d" % (a, a, x, y))
+            x, y = origin(c, rect, a, m)
+            self.windows[c].geometry("%dx%d%+d%+d" % (s, s, x, y))
 
     def hide(self):
         # Moved off-screen rather than withdrawn: showing a window again can
