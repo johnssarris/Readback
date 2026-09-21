@@ -37,6 +37,10 @@ Drop in the PNG, the text file it shows, and a sidecar:
 }
 ```
 
+The text file has to hold exactly what the window shows - if the document
+runs past the bottom of the screenful, cut it there, since nothing below the
+window edge can be read from the image.
+
 That is all a screenshot needs. A **photo** also needs the window's corners in
 image pixels, clockwise from the top left, because nothing in the image says
 where the window edge is:

@@ -4,8 +4,14 @@ import type { MarginBounds } from "./margins";
 export interface CellPitch {
   widthPx: number;
   heightPx: number;
-  /** Vertical center (in full rectified-image coordinates) of each detected gutter row. */
+  /** Vertical center (in full rectified-image coordinates) of each displayed row's line box. */
   rowYCenters: number[];
+  /**
+   * Text baseline of each row, taken from the feet of the line numbers and
+   * carried across rows that have none (a wrapped continuation, or a row whose
+   * number was too faint to find).
+   */
+  rowBaselines: number[];
 }
 
 /**
@@ -27,6 +33,47 @@ const PHASE_BINS = 12;
 /** Columns of text ink needed before the text area is worth measuring. */
 const MIN_INK_COLUMNS = 12;
 
+/** Inked pixels an image row needs before it counts as a row rather than noise. */
+const MIN_ROW_INK = 2;
+
+/**
+ * Above this share of the body's width, a dark row is the window's own edge
+ * rather than text. Even a dense line of code leaves most of its row as page;
+ * the soft boundary where the body meets the chrome darkens all of it, and
+ * would otherwise add a row past the end of the document.
+ */
+const MAX_ROW_INK_FRACTION = 0.6;
+
+/** Most phase bins used to count the rows within one line's spacing. */
+const ROW_PHASE_BINS = 32;
+
+/** A wrapped line is taken to occupy at most this many rows. */
+const MAX_ROWS_PER_LINE = 4;
+
+/** Share of the busiest phase's ink that still counts as part of a row. */
+const BAND_THRESHOLD = 0.15;
+
+/**
+ * A line number's ink is at least this tall, as a share of the line spacing -
+ * cap height is well over half a line box in any face. Below it, a band is the
+ * soft edge of the window chrome or a speck, and taking one as a row puts the
+ * whole grid half a row out.
+ */
+const MIN_DIGIT_HEIGHT = 0.25;
+
+/**
+ * How far a row's box may hang outside the body before it stops being a row.
+ * The first and last rows of a screenful sit right against the chrome and can
+ * legitimately overhang it slightly; a "row" past the end of the document,
+ * conjured by the soft edge where the body meets the chrome, hangs out by most
+ * of its height.
+ */
+const MAX_ROW_OVERHANG = 0.25;
+
+/** Fine sweep around the chosen pitch, and its step, in px. */
+const PITCH_POLISH = 0.06;
+const ROW_PITCH_STEP = 0.02;
+
 /** Typical width/height ratio of a monospace cell; the last-resort seed when there is no text to measure. */
 const ASSUMED_ASPECT_RATIO = 0.5;
 
@@ -40,12 +87,216 @@ const MIN_BLOB_WIDTH_FRACTION = 0.4;
  */
 export function calibrateCellPitch(image: ImageData, margins: MarginBounds): CellPitch {
   const gutter = analyzeGutter(image, margins);
-  const heightPx = gutter.cellHeightPx;
+  const rows = detectRows(image, margins, gutter);
 
   const widthPx =
-    estimateWidthFromText(image, margins, heightPx) ?? gutter.widthFromDigits(heightPx * ASSUMED_ASPECT_RATIO);
+    estimateWidthFromText(image, margins, rows.pitch) ?? gutter.widthFromDigits(rows.pitch * ASSUMED_ASPECT_RATIO);
 
-  return { widthPx, heightPx, rowYCenters: gutter.rowYCenters };
+  return {
+    widthPx,
+    heightPx: rows.pitch,
+    rowYCenters: rows.centers,
+    rowBaselines: rows.baselines,
+  };
+}
+
+/**
+ * Finds the displayed rows from ink across the whole body, and fits a grid to them.
+ *
+ * Reading rows from the line numbers alone loses every row that hasn't got one:
+ * with word wrap on, a wrapped continuation is numberless, so its text was never
+ * read at all, and the gaps it left made the row spacing come out a multiple of
+ * the truth. Ink anywhere on a row - a line number, text, either - marks a row
+ * that exists.
+ *
+ * The rows are then fitted rather than used as found, so a row's box comes from
+ * the grid the editor laid out and not from the shape of what happens to be on
+ * it: a line of "aeo" has no ascenders and a line of "^^^" no baseline, but both
+ * sit in the same box as every other.
+ */
+function detectRows(image: ImageData, margins: MarginBounds, gutter: GutterAnalysis): RowGrid {
+  const profile = rowInkProfile(image, margins);
+  const first = profile.findIndex((c) => c >= MIN_ROW_INK);
+  if (first < 0 || gutter.digitRuns.length < 2 || !(gutter.cellHeightPx > 0)) {
+    return fallbackGrid(gutter);
+  }
+  let last = profile.length - 1;
+  while (last > first && profile[last] < MIN_ROW_INK) last--;
+
+  const y0 = Math.max(0, Math.round(margins.bodyTopY));
+  const pitch = rowPitch(profile, gutter.cellHeightPx);
+
+  // The line numbers fix the grid's phase: enumerate rows from one of them,
+  // outward, far enough to cover everything in the body that has ink on it -
+  // which is how a wrapped continuation row, numberless by definition, gets a
+  // row of its own instead of being skipped.
+  const anchor = (gutter.digitRuns[0].start + gutter.digitRuns[0].end) / 2;
+  const firstIndex = Math.ceil((y0 + first - anchor) / pitch - 0.5);
+  const lastIndex = Math.floor((y0 + last - anchor) / pitch + 0.5);
+
+  const overhang = pitch * MAX_ROW_OVERHANG;
+  const centers: number[] = [];
+  for (let k = firstIndex; k <= lastIndex; k++) {
+    const center = anchor + k * pitch;
+    if (center - pitch / 2 < margins.bodyTopY - overhang) continue;
+    if (center + pitch / 2 > margins.bodyBottomY + overhang) continue;
+    centers.push(center);
+  }
+  if (centers.length === 0) {
+    return fallbackGrid(gutter);
+  }
+
+  return { pitch, centers, baselines: fitBaselines(gutter, centers[0], pitch, centers) };
+}
+
+/**
+ * The row pitch, from the line numbers' spacing and how many rows fit in it.
+ *
+ * Line numbers are a line apart, which is a whole number of rows: one for a line
+ * that fits, more for one the editor wrapped. Folding the body's ink onto its
+ * phase within that spacing shows how many rows there are - one band of ink per
+ * row - and the pitch is the spacing divided by however many come back.
+ *
+ * Counting bands rather than scoring candidate pitches matters: a pitch of half
+ * a row divides the true one exactly, so it folds just as neatly and scores just
+ * as well. Only the number of bands tells them apart.
+ *
+ * Taking the pitch from the ink alone would be worse again: at small font sizes
+ * a photograph blurs one row's descenders into the next row's ascenders, and
+ * rows that touch cannot be counted at all.
+ */
+function rowPitch(profile: number[], lineSpacing: number): number {
+  const coarse = lineSpacing / rowsPerLine(profile, lineSpacing);
+
+  // Polish: the line numbers' spacing is a median of whole-pixel measurements,
+  // and a fraction of a pixel per row is a whole row by the bottom of a screenful.
+  let refined = coarse;
+  let refinedScore = -Infinity;
+  for (let pitch = coarse * (1 - PITCH_POLISH); pitch <= coarse * (1 + PITCH_POLISH); pitch += ROW_PITCH_STEP) {
+    const score = periodicityScore(profile, pitch);
+    if (score > refinedScore) {
+      refinedScore = score;
+      refined = pitch;
+    }
+  }
+  return refined;
+}
+
+/** How many bands of ink fall within one line's spacing: one per displayed row. */
+function rowsPerLine(profile: number[], lineSpacing: number): number {
+  // Never more bins than the spacing has pixels: with bins finer than the
+  // samples, empty ones fall between the full ones and every phase reads as a
+  // band of its own.
+  const binCount = Math.max(2, Math.min(ROW_PHASE_BINS, Math.floor(lineSpacing)));
+
+  const bins = new Array(binCount).fill(0);
+  let total = 0;
+  for (let i = 0; i < profile.length; i++) {
+    const phase = i % lineSpacing;
+    bins[Math.min(binCount - 1, Math.floor((phase / lineSpacing) * binCount))] += profile[i];
+    total += profile[i];
+  }
+  if (total === 0) return 1;
+
+  // Counted well below the peak, because a row is not one smooth hump: ink
+  // thins out between the tops of the capitals and the x-height band, and a
+  // threshold near the average splits a single row in two there. The gap
+  // between one row and the next has next to no ink in it at all, which is what
+  // separates rows from the dips inside them.
+  //
+  // Counted around the cycle from the emptiest phase, so a band straddling the
+  // wrap-around isn't counted twice.
+  const threshold = Math.max(...bins) * BAND_THRESHOLD;
+  const start = bins.indexOf(Math.min(...bins));
+  let bands = 0;
+  let inBand = false;
+  for (let i = 0; i < binCount; i++) {
+    const above = bins[(start + i) % binCount] > threshold;
+    if (above && !inBand) bands++;
+    inBand = above;
+  }
+
+  return Math.min(MAX_ROWS_PER_LINE, Math.max(1, bands));
+}
+
+interface RowGrid {
+  pitch: number;
+  centers: number[];
+  baselines: number[];
+}
+
+/**
+ * Where each row's baseline sits, from the line numbers' feet.
+ *
+ * Digits have no descenders, so the bottom of a line number's ink is the text
+ * baseline itself - a fixed landmark in the line box, unlike the ink of text,
+ * which starts and ends wherever that line's characters happen to reach.
+ */
+function fitBaselines(gutter: GutterAnalysis, firstCenter: number, pitch: number, centers: number[]): number[] {
+  const offsets: number[] = [];
+  for (const run of gutter.digitRuns) {
+    const k = Math.round(((run.start + run.end) / 2 - firstCenter) / pitch);
+    offsets.push(run.end - (firstCenter + pitch * k));
+  }
+
+  // Without any line numbers to go on, the middle of the box is the best guess.
+  const offset = offsets.length > 0 ? median(offsets) : 0;
+  return centers.map((c) => c + offset);
+}
+
+function fallbackGrid(gutter: GutterAnalysis): RowGrid {
+  return {
+    pitch: gutter.cellHeightPx,
+    centers: gutter.rowYCenters,
+    baselines: gutter.rowYCenters,
+  };
+}
+
+/** Median gap between the centers of consecutive bands. */
+function spacingOf(bands: Array<{ start: number; end: number }>): number {
+  const diffs: number[] = [];
+  for (let i = 1; i < bands.length; i++) {
+    diffs.push((bands[i].start + bands[i].end) / 2 - (bands[i - 1].start + bands[i - 1].end) / 2);
+  }
+  return median(diffs);
+}
+
+function filterShortBands(
+  bands: Array<{ start: number; end: number }>,
+  spacing: number
+): Array<{ start: number; end: number }> {
+  if (!Number.isFinite(spacing) || spacing <= 0) return bands;
+  const kept = bands.filter((b) => b.end - b.start >= spacing * MIN_DIGIT_HEIGHT);
+  return kept.length >= 2 ? kept : bands;
+}
+
+/** Inked pixel count for each row of the body, line numbers and text alike. */
+function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
+  const x0 = Math.max(0, Math.round(margins.gutterLeftX));
+  const x1 = Math.min(image.width, Math.round(margins.textAreaRightX));
+  const y0 = Math.max(0, Math.round(margins.bodyTopY));
+  const y1 = Math.min(image.height, Math.round(margins.bodyBottomY));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return [];
+
+  const values: number[] = [];
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * image.width + x) * 4;
+      values.push(luminance(image.data[i], image.data[i + 1], image.data[i + 2]));
+    }
+  }
+  const threshold = otsuThreshold(values);
+
+  const limit = (x1 - x0) * MAX_ROW_INK_FRACTION;
+  const counts = new Array(y1 - y0).fill(0);
+  let index = 0;
+  for (let y = 0; y < y1 - y0; y++) {
+    for (let x = x0; x < x1; x++) {
+      if (values[index++] <= threshold) counts[y]++;
+    }
+    if (counts[y] > limit) counts[y] = 0;
+  }
+  return counts;
 }
 
 /**
@@ -134,6 +385,8 @@ function periodicityScore(profile: number[], width: number): number {
 interface GutterAnalysis {
   rowYCenters: number[];
   cellHeightPx: number;
+  /** The vertical extent of each row's line-number ink; its end is that row's baseline. */
+  digitRuns: Array<{ start: number; end: number }>;
   /** The old estimate: digit ink extent divided by digit count. Biased narrow; a last resort. */
   widthFromDigits: (seedWidth: number) => number;
 }
@@ -170,14 +423,19 @@ function analyzeGutter(image: ImageData, margins: MarginBounds): GutterAnalysis 
     rowProjection[y] = count;
   }
 
-  const rowRuns = findRuns(rowProjection.map((c) => c > 0));
-  const rowYCenters = rowRuns.map((r) => bodyTopY + (r.start + r.end) / 2);
+  // Both ends of the count mean "not a line number". A lone dark pixel is the
+  // window's own border edge, and at one pixel per row it bridges the gaps
+  // between digits and splits each one into pieces. A row that is dark right
+  // across the margin is the soft edge where the body meets the chrome, and it
+  // merges into the first or last digit and drags its center half a row off.
+  const gutterInkLimit = cropWidth * MAX_ROW_INK_FRACTION;
+  const bands = findRuns(rowProjection.map((c) => c >= MIN_ROW_INK && c <= gutterInkLimit));
 
-  const heightDiffs: number[] = [];
-  for (let i = 1; i < rowYCenters.length; i++) {
-    heightDiffs.push(rowYCenters[i] - rowYCenters[i - 1]);
-  }
-  const cellHeightPx = median(heightDiffs);
+  // Two passes: the bands give a rough line spacing, and that spacing says which
+  // of them were too small to have been a number in the first place.
+  const rowRuns = filterShortBands(bands, spacingOf(bands));
+  const rowYCenters = rowRuns.map((r) => bodyTopY + (r.start + r.end) / 2);
+  const cellHeightPx = spacingOf(rowRuns);
 
   const widthFromDigits = (seedWidth: number): number => {
     const refinedWidths: number[] = [];
@@ -208,5 +466,7 @@ function analyzeGutter(image: ImageData, margins: MarginBounds): GutterAnalysis 
     return refinedWidths.length > 0 ? median(refinedWidths) : seedWidth;
   };
 
-  return { rowYCenters, cellHeightPx, widthFromDigits };
+  const digitRuns = rowRuns.map((r) => ({ start: bodyTopY + r.start, end: bodyTopY + r.end }));
+
+  return { rowYCenters, cellHeightPx, digitRuns, widthFromDigits };
 }

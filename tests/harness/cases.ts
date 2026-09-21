@@ -56,6 +56,12 @@ export function loadFixtures(): Fixture[] {
         throw new Error(`Fixture ${name}.json has no ${name}.png beside it`);
       }
       const text = readFileSync(join(FIXTURE_DIR, meta.text), "utf8").replace(/\n$/, "");
-      return { name, meta, image: loadPng(png), lines: text.split("\n") };
+
+      // Only what the window actually shows can be recognized from it, so a
+      // source file longer than the screenful is truncated to what is on screen
+      // rather than charged as errors.
+      const lines = text.split("\n");
+      const visible = meta.truth?.rowCount ?? lines.length;
+      return { name, meta, image: loadPng(png), lines: lines.slice(0, visible) };
     });
 }

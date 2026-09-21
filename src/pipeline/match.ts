@@ -17,6 +17,8 @@ export interface AtlasManifest {
 export interface GlyphAtlas {
   cellWidth: number;
   cellHeight: number;
+  /** Where the baseline sits inside a template cell, as a fraction of its height. */
+  baselineFraction?: number;
   glyphs: Map<string, Float32Array>;
 }
 
@@ -68,7 +70,12 @@ export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasMa
     glyphs.set(char, gray);
   }
 
-  return { cellWidth: manifest.cellWidth, cellHeight: manifest.cellHeight, glyphs };
+  return {
+    cellWidth: manifest.cellWidth,
+    cellHeight: manifest.cellHeight,
+    baselineFraction: manifest.baselineFraction,
+    glyphs,
+  };
 }
 
 /**
