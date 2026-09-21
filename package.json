@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "metrics": "vitest run tests/pipeline.metrics.test.ts --disable-console-intercept",
-    "fixtures": "node tools/render-fixtures.mjs"
+    "fixtures": "node tools/render-fixtures.mjs",
+    "atlas": "node tools/generate-atlas.mjs"
   },
   "devDependencies": {
     "@fontsource/cascadia-mono": "^5.3.0",

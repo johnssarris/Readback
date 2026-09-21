@@ -1,6 +1,9 @@
 import { luminance, resampleToGray, type Rect } from "./imageUtils";
 
 export interface AtlasManifest {
+  /** The face the templates were rendered from; the editor being photographed has to match it. */
+  font?: string;
+  fontFamily?: string;
   cellWidth: number;
   cellHeight: number;
   canvasWidth: number;

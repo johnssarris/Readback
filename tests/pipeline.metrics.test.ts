@@ -13,6 +13,9 @@ import { loadAtlas, runFixture, type Mode } from "./harness/run";
 const fixtures = loadFixtures();
 const MODES: Mode[] = ["flat", "camera"];
 
+/** Recognition is a normalized cross-correlation per glyph per cell; a fixture takes seconds, not milliseconds. */
+const TIMEOUT_MS = 120_000;
+
 function fmt(value: number | null, digits = 1, suffix = ""): string {
   if (value === null || Number.isNaN(value)) return "-";
   return value.toFixed(digits) + suffix;
@@ -52,7 +55,7 @@ describe("pipeline metrics", () => {
         // Sanity only: the run produced a grid at all.
         expect(margins.gutterRightEdgeX).toBeGreaterThan(0);
         expect(Number.isFinite(pitch.widthPx)).toBe(true);
-      });
+      }, TIMEOUT_MS);
     }
   }
 
