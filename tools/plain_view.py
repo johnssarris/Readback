@@ -9,13 +9,15 @@ See tools/README.md for why each setting is what it is.
 What "on" does:
   - switches the document to a User Defined Language that supplies the font
   - forces every style to black on white, no bold/italic/underline, fixed size
-  - gives the line number margin a grey background, distinct from the page
-  - switches font rendering to grayscale antialiasing rather than ClearType
+  - gives the line number margin a light grey background, so there's a clear
+    edge between the line numbers and the text
+  - switches font rendering to grayscale antialiasing, so text edges are
+    plain grey rather than ClearType's coloured fringes
   - hides the caret, current-line highlight, and change-history markers
   - hides the bookmark, fold, and change-history margins (keeps line numbers)
   - resets zoom, turns off whitespace symbols, EOL markers, indent guides,
     and the edge line
-  - turns on word wrap, so no line runs off the right edge (WRAP below)
+  - turns on word wrap, so nothing runs off the right edge (WRAP below)
 
 What "off" does:
   - switches back to the original language, which makes Notepad++ reapply
@@ -31,9 +33,10 @@ One-time setup:
   2. Set Settings > Style Configurator > Global Styles > Line number margin
      to Cascadia Mono, and leave its size blank. Font only: this script sets
      the size itself while plain view is on, and a size set here would apply
-     the rest of the time too. Scintilla takes a line's height from the
-     tallest style on it, so a gutter size larger than your normal text size
-     would change line spacing for all your ordinary editing. Leave
+     the rest of the time too. Scintilla takes the line height from the
+     tallest style in the editor, the gutter included, so a gutter size
+     larger than your normal text size would change line spacing for all
+     your ordinary editing. Leave
      bold/italic/underline unchecked.
      The gutter takes its font from there, not from the UDL.
   3. Test from a terminal: python plain_view.py  (run twice)
@@ -41,9 +44,10 @@ One-time setup:
          pythonw "C:\\path\\to\\plain_view.py"
      then Save... and assign a shortcut.
 
-Cascadia Mono is the face to set, and it has to be set in all three places
-above: the UDL's Default style, the UDL's Number style, and Global Styles >
-Line number margin. It ships with Windows 11.
+Use the same font in all three places above - the UDL's Default style, the
+UDL's Number style, and Global Styles > Line number margin - so the text, the
+numbers in the text, and the line numbers all render in one consistent face.
+Cascadia Mono ships with Windows 11.
 
 Notes:
   - Notepad++ must not be running as administrator. Windows blocks messages
@@ -51,8 +55,9 @@ Notes:
   - In split view the script targets the larger pane. If the panes change
     between toggling on and off, the saved window is toggled off instead.
   - Windows display scaling changes how many device pixels a point size
-    renders to, so keep it fixed (100% is the reference) if anything
-    downstream measures in pixels.
+    renders to, so the same SIZE looks larger or smaller on screen at
+    different scaling. Keep scaling consistent (100% recommended) for a
+    consistent result.
   - If the original document was itself a UDL, toggling off can't switch
     back to it. Pick it from the Language menu.
   - Scintilla message IDs are commented inline. The full list is in the
@@ -72,8 +77,9 @@ INK = 0x000000           # text color, as 0xBBGGRR
 PAPER = 0xFFFFFF         # background color, as 0xBBGGRR
 GUTTER = 0xE0E0E0        # line number margin background, as 0xBBGGRR
 TEXT_GAP = 0             # pixels between line numbers and text
-# Word wrap. On: a line wider than the window is shown in full, broken across
-# several rows, rather than running off the right edge unseen.
+# Word wrap. On: long lines continue on the next row (with no line number),
+# so every line stays fully visible. Off: a line wider than the window runs
+# off the right edge.
 WRAP = True
 STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
 STATE_VERSION = 2        # bump if the saved state format changes
@@ -218,8 +224,8 @@ def turn_on(editor):
             sci(2059, s, 0)       # SCI_STYLESETUNDERLINE
             sci(2055, s, SIZE)    # SCI_STYLESETSIZE
 
-        # Black digits on a grey gutter: the margin stays a different shade
-        # from the page, so the boundary between them is visible.
+        # Black digits on a light grey gutter, so the line numbers stay
+        # visibly separate from the text.
         sci(2052, LINE_NUMBER, GUTTER)          # SCI_STYLESETBACK
 
         # Grayscale antialiasing instead of ClearType, which tints the edge

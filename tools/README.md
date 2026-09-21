@@ -19,12 +19,17 @@ to make one of those steps possible.
 
 **Black on white, no bold, italic or underline, one size.** Templates are one
 weight in one face. A syntax theme puts half a dozen variants on screen, and a
-bold or italic glyph correlates badly against an upright regular one.
+bold or italic glyph correlates badly against an upright regular one. Underline
+is worse than either: it puts ink in cells that are otherwise blank.
 
 **A grey line number margin.** The boundary between the margin and the page is
 found as a step in background brightness. Painted the same white as the page
 there is no step to find, and the first thing that looks like one is the left
 edge of the digits.
+
+**No gap between the margin and the text (`TEXT_GAP = 0`).** The margin's left
+padding is painted in the text's background colour, so a gap sits on the text's
+side of that boundary and offsets every column in every row by its width.
 
 **Grayscale antialiasing rather than ClearType.** Subpixel rendering tints the
 edge of every stroke, which shifts the luminance a template is compared
@@ -48,9 +53,19 @@ the numbers in the margin, and they say which line each row belongs to.
 
 **One font, set in three places.** Cascadia Mono, in the UDL's Default style,
 the UDL's Number style, and Global Styles > Line number margin. The margin's
-size is deliberately left blank there: Scintilla takes a line's height from the
-tallest style on the line, so a size set on the margin changes line spacing for
-ordinary editing too. The script sets the size itself while plain view is on.
+size is deliberately left blank there: Scintilla takes the line height from the
+tallest style in the editor, the gutter included, so a size set on the margin
+changes line spacing for ordinary editing too. The script sets the size itself
+while plain view is on.
+
+The margin is the one place a different face is survivable — line numbers are
+read from the shape of their ink rather than sliced at the text's cell width
+(`src/pipeline/lineNumbers.ts`), and two fixtures cover exactly that case — but
+a matching face is still the reference.
+
+**Display scaling held still.** A point size maps to a different number of
+pixels at different Windows scaling, so the same `SIZE` is a different size on
+screen. Keep it at 100% if anything downstream measures in pixels.
 
 ## The corner markers
 
@@ -84,6 +99,9 @@ service of finding them again in a photograph:
 renderer and the detector both read it. `overlay.py` keeps its own copy, since
 it runs on a different machine and imports nothing, and a test reads the
 constants back out of it and fails if the two have drifted apart.
+
+Status: the overlay is a standalone test version, run by hand while plain view
+is on. `plain_view.py` does not launch it.
 
 ## What the rendered fixtures are, and are not
 
