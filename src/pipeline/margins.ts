@@ -18,12 +18,12 @@ export const BOUNDARY_THRESHOLD = 12;
  * Text is a minority of any line it sits on, so reading above it — at the bright
  * end — gives the background the line is drawn on, and ink stops registering as
  * a boundary at all. It has to clear the ink but stay below any specular
- * highlight, and 0.75 leaves room on both sides: a column needs only a quarter
- * of its pixels to be background to read as background, which every column of a
- * line-number gutter has (digits are shorter than the line box, and not every
- * line's number reaches every column).
+ * highlight. A quarter of the way down was not enough: a line of dense
+ * punctuation running the full width of a maximised window inks more than a
+ * quarter of its own row, and reading into that ink put the top of the body ten
+ * rows below where it belongs.
  */
-const PROFILE_PERCENTILE = 0.75;
+const PROFILE_PERCENTILE = 0.9;
 
 /** Boundaries closer together than this (px) are treated as the same edge (anti-aliasing). */
 const MERGE_DISTANCE = 3;

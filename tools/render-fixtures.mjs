@@ -35,6 +35,12 @@ const CASES = [
   // Narrow enough that the long lines wrap, which is what plain view's WRAP
   // setting produces: continuation rows carrying text and no line number.
   { name: "code-wrapped", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 560, height: 820, wrap: true },
+  // A maximised window on a 1080p screen, which is how the editor is actually
+  // going to be sitting: wider than the 1600px the capture is rectified to, so
+  // the pipeline shrinks it rather than blowing it up. Different text as well -
+  // deep indentation, lines long enough to wrap even this wide, 0O1lI, dense
+  // punctuation, blank lines.
+  { name: "varied-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1040, wrap: true },
 ];
 
 const fontDataUrl = (() => {

@@ -540,17 +540,25 @@ function columnInkProfile(image: ImageData, x0: number, x1: number, y0: number, 
  * spreads evenly across phases, so the contrast collapses.
  */
 function periodicityScore(profile: number[], width: number): number {
-  const bins = new Array(PHASE_BINS).fill(0);
+  // Never more bins than the width has pixels. A window wider than the 1600px a
+  // capture is rectified to gets shrunk, not blown up, and its cells come out
+  // under ten pixels across - at which point twelve bins leaves some of them
+  // with no samples at all, and the gaps between them read as contrast. Every
+  // candidate width then scores by how badly it aliases rather than how well it
+  // fits, and the narrowest wins.
+  const binCount = Math.max(2, Math.min(PHASE_BINS, Math.floor(width)));
+
+  const bins = new Array(binCount).fill(0);
   let total = 0;
 
   for (let x = 0; x < profile.length; x++) {
     const phase = ((x % width) + width) % width;
-    bins[Math.min(PHASE_BINS - 1, Math.floor((phase / width) * PHASE_BINS))] += profile[x];
+    bins[Math.min(binCount - 1, Math.floor((phase / width) * binCount))] += profile[x];
     total += profile[x];
   }
   if (total === 0) return 0;
 
-  const mean = total / PHASE_BINS;
+  const mean = total / binCount;
   let variance = 0;
   for (const bin of bins) variance += (bin - mean) ** 2;
   return variance / (mean * mean);

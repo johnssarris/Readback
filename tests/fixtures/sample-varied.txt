@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Ledger reconciliation: 0O1lI are the characters that get misread."""
+
+import re
+from collections import defaultdict
+
+PATTERN = re.compile(r"^\s*(?P<id>[A-Z]{2}-\d{4})\s+(?P<amt>-?\d+\.\d{2})\s*$")
+LOOKALIKES = {"0": "O", "O": "0", "1": "l", "l": "1", "I": "1", "|": "I"}
+SCHEMA = {"id": "AA-0000", "amount": -0.01, "flags": ["reconciled", "manual", "carried-over"], "note": "long enough to wrap even in a maximised window, which is the point of it"}
+# punctuation sweep: ~!@#$%^&*()_+`-={}|[]\:";'<>?,./ and again ~!@#$%^&*()_+ so the row runs past the right edge of a 1920px window and has to wrap
+
+
+def parse(lines):
+    out = defaultdict(list)
+    for n, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        m = PATTERN.match(line)
+        if m is None:
+            if line.lstrip().startswith("#"):
+                continue
+            raise ValueError(f"line {n}: {line!r}")
+        out[m["id"]].append(float(m["amt"]))
+    return out
+
+
+def reconcile(ledger, *, tolerance=0.01, verbose=False):
+    totals = {}
+    for key, amounts in sorted(ledger.items()):
+        if len(amounts) < 2:
+            totals[key] = amounts[0] if amounts else 0.0
+            continue
+        credit = sum(a for a in amounts if a > 0)
+        debit = sum(a for a in amounts if a < 0)
+        if abs(credit + debit) <= tolerance:
+            totals[key] = 0.0
+        else:
+            totals[key] = round(credit + debit, 2)
+            if verbose:
+                print(f"  {key}: {credit:>10.2f} {debit:>10.2f} -> {totals[key]:>10.2f}")
+    return totals
+
+
+if __name__ == "__main__":
+    import sys
+    rows = parse(sys.stdin.read().splitlines())
+    result = reconcile(rows, verbose=("-v" in sys.argv or "--verbose" in sys.argv))
+    print("; ".join(f"{k}={v:.2f}" for k, v in result.items() if v != 0.0) or "(balanced)")
