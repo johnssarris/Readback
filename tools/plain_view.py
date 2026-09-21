@@ -4,17 +4,13 @@ plain_view.py: toggle Notepad++ into a plain, high-contrast view and back.
 Runs from a normal Python 3 install and sends standard Windows messages to
 Notepad++. No plugin needed. Run once to turn on, run again to restore.
 
-The point of the plain view is to make a photographed Notepad++ window
-readable by the Readback pipeline, which segments the text into a fixed
-character grid and matches every cell against a glyph atlas.
-
 What "on" does:
   - switches the document to a User Defined Language that supplies the font
   - forces every style to black on white, no bold/italic/underline, fixed size
-  - gives the line number margin a grey background, so the margin detector has
-    a background step to find at the gutter/text boundary
-  - switches font rendering to grayscale antialiasing, so ClearType's colour
-    fringing doesn't skew the luminance the matcher works from
+  - gives the line number margin a light grey background, so there's a clear
+    edge between the line numbers and the text
+  - switches font rendering to grayscale antialiasing, so text edges are
+    plain grey rather than ClearType's coloured fringes
   - hides the caret, current-line highlight, and change-history markers
   - hides the bookmark, fold, and change-history margins (keeps line numbers)
   - resets zoom, turns off whitespace symbols, EOL markers, indent guides,
@@ -35,9 +31,10 @@ One-time setup:
   2. Set Settings > Style Configurator > Global Styles > Line number margin
      to Cascadia Mono, and leave its size blank. Font only: this script sets
      the size itself while plain view is on, and a size set here would apply
-     the rest of the time too. Scintilla takes a line's height from the
-     tallest style on it, so a gutter size larger than your normal text size
-     would change line spacing for all your ordinary editing. Leave
+     the rest of the time too. Scintilla takes the line height from the
+     tallest style in the editor, the gutter included, so a gutter size
+     larger than your normal text size would change line spacing for all
+     your ordinary editing. Leave
      bold/italic/underline unchecked.
      The gutter takes its font from there, not from the UDL.
   3. Test from a terminal: python plain_view.py  (run twice)
@@ -45,12 +42,10 @@ One-time setup:
          pythonw "C:\\path\\to\\plain_view.py"
      then Save... and assign a shortcut.
 
-The font matters as much as the colors: Readback's glyph atlas is built from
-one specific face, and a cell only matches if the photographed glyph has the
-same shape. Cascadia Mono is the reference face (it ships with Windows 11),
-and it has to be set in all three places above - the UDL's Default style, the
-UDL's Number style, and Global Styles > Line number margin - or the gutter and
-the text will be measured against templates they don't match.
+Use the same font in all three places above - the UDL's Default style, the
+UDL's Number style, and Global Styles > Line number margin - so the text, the
+numbers in the text, and the line numbers all render in one consistent face.
+Cascadia Mono ships with Windows 11.
 
 Notes:
   - Notepad++ must not be running as administrator. Windows blocks messages
@@ -58,9 +53,9 @@ Notes:
   - In split view the script targets the larger pane. If the panes change
     between toggling on and off, the saved window is toggled off instead.
   - Windows display scaling changes how many device pixels a point size
-    renders to. Anything measured in pixels - SIZE's on-screen height, the
-    cell pitch Readback calibrates - shifts with it, so keep scaling fixed
-    (100% is the reference) between captures.
+    renders to, so the same SIZE looks larger or smaller on screen at
+    different scaling. Keep scaling consistent (100% recommended) for a
+    consistent result.
   - If the original document was itself a UDL, toggling off can't switch
     back to it. Pick it from the Language menu.
   - Scintilla message IDs are commented inline. The full list is in the
@@ -80,10 +75,9 @@ INK = 0x000000           # text color, as 0xBBGGRR
 PAPER = 0xFFFFFF         # background color, as 0xBBGGRR
 GUTTER = 0xE0E0E0        # line number margin background, as 0xBBGGRR
 TEXT_GAP = 0             # pixels between line numbers and text
-# Word wrap. On: the pipeline finds rows from ink across the whole body and
-# treats a numberless row as a continuation of the one above, so a wrapped
-# line is read and put back together. With wrap off, a line wider than the
-# window runs off the right edge and is lost silently instead.
+# Word wrap. On: long lines continue on the next row (with no line number),
+# so every line stays fully visible. Off: a line wider than the window runs
+# off the right edge.
 WRAP = True
 STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
 STATE_VERSION = 2        # bump if the saved state format changes
@@ -228,14 +222,12 @@ def turn_on(editor):
             sci(2059, s, 0)       # SCI_STYLESETUNDERLINE
             sci(2055, s, SIZE)    # SCI_STYLESETSIZE
 
-        # Black digits on a grey gutter. Readback finds the gutter/text
-        # boundary from a step in background brightness, so the margin has to
-        # stay a different shade from the page.
+        # Black digits on a light grey gutter, so the line numbers stay
+        # visibly separate from the text.
         sci(2052, LINE_NUMBER, GUTTER)          # SCI_STYLESETBACK
 
-        # Grayscale antialiasing instead of ClearType: subpixel rendering
-        # tints the edge of every stroke, which shifts the luminance the
-        # matcher correlates against.
+        # Grayscale antialiasing instead of ClearType, which tints the edge
+        # of every stroke with colour.
         sci(2611, QUALITY_ANTIALIASED)          # SCI_SETFONTQUALITY
 
         # Hide the caret and the current-line highlight. The highlight is
