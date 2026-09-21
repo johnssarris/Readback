@@ -1,0 +1,39 @@
+{
+  "kind": "render",
+  "text": "sample-code.txt",
+  "note": "Chromium-rendered stand-in. Geometry metrics only - not valid for atlas comparison.",
+  "truth": {
+    "cellWidthPx": 15.234375,
+    "cellHeightPx": 32,
+    "bodyTopY": 70,
+    "bodyBottomY": 778,
+    "gutterRightEdgeX": 48,
+    "textAreaLeftX": 48,
+    "rowCount": 22,
+    "rowYCenters": [
+      86,
+      118,
+      150,
+      182,
+      214,
+      246,
+      278,
+      310,
+      342,
+      374,
+      406,
+      438,
+      470,
+      502,
+      534,
+      566,
+      598,
+      630,
+      662,
+      694,
+      726,
+      758
+    ],
+    "fontPx": 26
+  }
+}

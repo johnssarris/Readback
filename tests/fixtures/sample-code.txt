@@ -1,0 +1,23 @@
+function renderReport(rows, options) {
+  const { width = 80, indent = 2 } = options ?? {};
+  const pad = " ".repeat(indent);
+
+  if (!Array.isArray(rows)) {
+    throw new TypeError("rows must be an array");
+  }
+
+  return rows
+    .filter((row) => row.visible !== false)
+    .map((row, i) => {
+      const label = `${i + 1}.`.padEnd(4, " ");
+      const value = String(row.value ?? "-");
+      return pad + label + value.slice(0, width - 8);
+    })
+    .join("\n");
+}
+
+// ASCII sweep: !"#$%&'()*+,-./0123456789:;<=>?@
+// ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`
+// abcdefghijklmnopqrstuvwxyz{|}~
+
+const TOTALS = { ok: 0, failed: 0, skipped: 0 };
