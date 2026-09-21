@@ -1,4 +1,5 @@
 import { estimateAspectRatio, warpPerspective, type Point } from "../pipeline/rectify";
+import { detectMarkerQuad } from "../pipeline/markers";
 import { detectMargins, type MarginBounds } from "../pipeline/margins";
 import { calibrateCellPitch, type CellPitch } from "../pipeline/calibrate";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
@@ -40,6 +41,9 @@ export class CaptureController {
   private resultView: HTMLDivElement | null = null;
 
   private phase: Phase = "live";
+
+  /** Whether the corners on screen came from the markers or from nowhere. */
+  private fromMarkers = false;
 
   /** Corner positions in frozen-frame pixels, which is what the warp needs. */
   private points: Record<Corner, Point> = {
@@ -143,9 +147,13 @@ export class CaptureController {
     this.retakeBtn.hidden = !adjusting;
     this.loupe.hidden = true;
 
-    this.hint.textContent = adjusting
-      ? "Drag each corner onto the corner of the editor pane"
-      : "Fill the frame with the window, hold steady, then freeze";
+    if (!adjusting) {
+      this.hint.textContent = "Fill the frame with the window, hold steady, then freeze";
+    } else if (this.fromMarkers) {
+      this.hint.textContent = "Corners found. Nudge any that look wrong, then read";
+    } else {
+      this.hint.textContent = "No corner markers found. Drag each corner onto the pane";
+    }
   }
 
   /** Takes the still everything from here on refers to. */
@@ -156,16 +164,27 @@ export class CaptureController {
 
     this.frame.width = width;
     this.frame.height = height;
-    this.frame.getContext("2d", { willReadFrequently: true })!.drawImage(this.video, 0, 0);
+    const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(this.video, 0, 0);
 
-    const mx = width * MARGIN_FRACTION;
-    const my = height * MARGIN_FRACTION;
-    this.points = {
-      tl: { x: mx, y: my },
-      tr: { x: width - mx, y: my },
-      br: { x: width - mx, y: height - my },
-      bl: { x: mx, y: height - my },
-    };
+    // The markers, if they are in the shot, know where the pane is better than
+    // a fingertip does. Failing that, a box to drag into place.
+    const quad = detectMarkerQuad(ctx.getImageData(0, 0, width, height));
+    this.fromMarkers = quad !== null;
+
+    if (quad) {
+      const [tl, tr, br, bl] = quad.corners;
+      this.points = { tl, tr, br, bl };
+    } else {
+      const mx = width * MARGIN_FRACTION;
+      const my = height * MARGIN_FRACTION;
+      this.points = {
+        tl: { x: mx, y: my },
+        tr: { x: width - mx, y: my },
+        br: { x: width - mx, y: height - my },
+        bl: { x: mx, y: height - my },
+      };
+    }
 
     this.setPhase("adjust");
     this.layoutHandles();

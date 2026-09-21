@@ -89,6 +89,8 @@
     "fontPx": 19,
     "wrapped": false,
     "gutterFont": "inconsolata",
-    "gutterAdvancePx": 9.500030517578125
+    "gutterAdvancePx": 9.500030517578125,
+    "paneRect": null,
+    "textAreaRightX": 900
   }
 }

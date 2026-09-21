@@ -5,7 +5,14 @@ import { PNG } from "pngjs";
 import { calibrateCellPitch, type CellPitch } from "../../src/pipeline/calibrate";
 import { detectMargins, type MarginBounds } from "../../src/pipeline/margins";
 import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "../../src/pipeline/match";
-import { estimateAspectRatio, warpImageData, type Point } from "../../src/pipeline/rectify";
+import {
+  applyHomography,
+  computeHomography,
+  estimateAspectRatio,
+  warpImageData,
+  type Point,
+} from "../../src/pipeline/rectify";
+import { detectMarkerQuad } from "../../src/pipeline/markers";
 import { buildRows, rowsToText } from "../../src/model/lineIndex";
 import { photograph, type CameraOptions } from "./degrade";
 import type { Fixture } from "./cases";
@@ -52,19 +59,27 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   let corners: Point[];
 
   if (fixture.meta.kind === "photo") {
-    // Already a photograph; its corners have to come from the sidecar.
-    if (!fixture.meta.corners) {
-      throw new Error(`Fixture ${fixture.name} is a photo but has no corners in its sidecar JSON`);
-    }
     image = source;
-    corners = fixture.meta.corners;
   } else if (mode === "camera") {
-    const view = photograph(source, camera);
-    image = view.image;
-    corners = view.corners;
+    image = photograph(source, camera).image;
   } else {
     image = source;
-    corners = fixture.meta.corners ?? [
+  }
+
+  // Corner markers first, since they name the pane itself rather than the
+  // window around it. The sidecar's own corners are next, and a flat capture
+  // with neither is its own frame.
+  const markers = detectMarkerQuad(image);
+  if (markers) {
+    corners = markers.corners;
+  } else if (fixture.meta.corners) {
+    corners = fixture.meta.corners;
+  } else if (fixture.meta.kind === "photo") {
+    throw new Error(`Fixture ${fixture.name} is a photo with no markers found and no corners in its sidecar`);
+  } else if (mode === "camera") {
+    corners = photograph(source, camera).corners;
+  } else {
+    corners = [
       { x: 0, y: 0 },
       { x: source.width, y: 0 },
       { x: source.width, y: source.height },
@@ -80,8 +95,32 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   const margins = detectMargins(rectified);
   const pitch = calibrateCellPitch(rectified, margins);
 
-  const scale = { x: DEST_WIDTH / source.width, y: destHeight / source.height };
-  const metrics = score(fixture, rectified, margins, pitch, scale);
+  // Truth is recorded in the drawn image's own coordinates. What was rectified
+  // is the pane when markers named it, and the whole window otherwise, so the
+  // mapping from one to the other differs.
+  const pane = fixture.meta.truth?.paneRect;
+  const region = pane
+    ? { left: pane.left, top: pane.top, width: pane.right - pane.left, height: pane.bottom - pane.top }
+    : { left: 0, top: 0, width: source.width, height: destHeight === 0 ? 1 : source.height };
+  const view = {
+    scale: { x: DEST_WIDTH / region.width, y: destHeight / region.height },
+    origin: { x: region.left, y: region.top },
+  };
+  const metrics = score(fixture, rectified, margins, pitch, view);
+
+  if (markers && pane) {
+    const want: Point[] = [
+      { x: pane.left, y: pane.top },
+      { x: pane.right, y: pane.top },
+      { x: pane.right, y: pane.bottom },
+      { x: pane.left, y: pane.bottom },
+    ];
+    // In a photographed frame the pane's corners are wherever the camera put
+    // them, so they are compared through the same mapping the camera applied.
+    const placed = mode === "camera" && fixture.meta.kind !== "photo" ? mapThroughCamera(source, image, want) : want;
+    metrics.markerErrorPx =
+      markers.corners.reduce((sum, c, i) => sum + Math.hypot(c.x - placed[i].x, c.y - placed[i].y), 0) / 4;
+  }
 
   let text: string | null = null;
   const atlas = loadAtlas();
@@ -94,7 +133,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
-  return { margins, pitch, metrics, text, rectified, scale };
+  return { margins, pitch, metrics, text, rectified, scale: view.scale };
 }
 
 function score(
@@ -102,9 +141,12 @@ function score(
   rectified: ImageData,
   margins: MarginBounds,
   pitch: CellPitch,
-  scale: { x: number; y: number }
+  view: { scale: { x: number; y: number }; origin: { x: number; y: number } }
 ): Metrics {
   const truth = fixture.meta.truth;
+  const { scale, origin } = view;
+  const atX = (x: number) => (x - origin.x) * scale.x;
+  const atY = (y: number) => (y - origin.y) * scale.y;
 
   const columns =
     Number.isFinite(pitch.widthPx) && pitch.widthPx > 0
@@ -117,15 +159,15 @@ function score(
     const n = Math.min(truth.rowYCenters.length, pitch.rowYCenters.length);
     let sum = 0;
     for (let i = 0; i < n; i++) {
-      sum += Math.abs(pitch.rowYCenters[i] - truth.rowYCenters[i] * scale.y);
+      sum += Math.abs(pitch.rowYCenters[i] - atY(truth.rowYCenters[i]));
     }
     rowOffsetCells = sum / n / pitch.heightPx;
   }
 
   return {
-    bodyTopErrorPx: truth ? margins.bodyTopY - truth.bodyTopY * scale.y : null,
-    bodyBottomErrorPx: truth ? margins.bodyBottomY - truth.bodyBottomY * scale.y : null,
-    gutterEdgeErrorPx: truth ? margins.gutterRightEdgeX - truth.gutterRightEdgeX * scale.x : null,
+    bodyTopErrorPx: truth ? margins.bodyTopY - atY(truth.bodyTopY) : null,
+    bodyBottomErrorPx: truth ? margins.bodyBottomY - atY(truth.bodyBottomY) : null,
+    gutterEdgeErrorPx: truth ? margins.gutterRightEdgeX - atX(truth.gutterRightEdgeX) : null,
     cellWidthErrorPct: truth ? pct(pitch.widthPx, truth.cellWidthPx * scale.x) : null,
     cellHeightErrorPct: truth ? pct(pitch.heightPx, truth.cellHeightPx * scale.y) : null,
     rowsDetected: pitch.rowYCenters.length,
@@ -137,7 +179,24 @@ function score(
     indentAccuracy: indentAccuracy(map, fixture.rows),
     cer: null,
     numberAccuracy: null,
+    markerErrorPx: null,
   };
+}
+
+/** The fixture's own points, as the camera simulation placed them in the frame. */
+function mapThroughCamera(source: ImageData, framed: ImageData, points: Point[]): Point[] {
+  void framed;
+  const view = photograph(source);
+  const h = computeHomography(
+    [
+      { x: 0, y: 0 },
+      { x: source.width, y: 0 },
+      { x: source.width, y: source.height },
+      { x: 0, y: source.height },
+    ],
+    view.corners
+  );
+  return points.map((p) => applyHomography(h, p));
 }
 
 function pct(actual: number, expected: number): number {

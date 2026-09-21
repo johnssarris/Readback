@@ -37,9 +37,17 @@ const CASES = [
   // that step of the setup was skipped. Its advance width is not the text's.
   { name: "gutter-courier", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "courier-prime" },
   { name: "gutter-inconsolata", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 620, gutterFont: "inconsolata" },
+  // With corner markers around the pane, as overlay.py draws them. The pane is
+  // inset from the window edge and has a scrollbar beside it, both of which the
+  // markers exclude.
+  { name: "markers-900", source: "sample-code.txt", fontPx: 19, lineHeight: 23, width: 900, height: 700, markers: true },
+  { name: "markers-1920", source: "sample-varied.txt", fontPx: 19, lineHeight: 23, width: 1920, height: 1080, wrap: true, markers: true },
 ];
 
 const dataUrl = (path) => `data:font/woff2;base64,${readFileSync(path).toString("base64")}`;
+
+/** The corner markers' geometry, from the one definition of it. */
+const MARKERS = JSON.parse(readFileSync(join(repo, "tools", "marker-geometry.json"), "utf8"));
 
 const fontDataUrl = dataUrl(join(repo, "public", "fonts", "cascadia-mono-latin-400-normal.woff2"));
 
@@ -61,6 +69,40 @@ const GUTTER_FONTS = {
 function pageSource() {
   return `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c"></canvas>
 <script>
+/**
+ * The four corner markers, laid out exactly as overlay.py lays them out: an L
+ * of two arms on a white tile, its outer corner on the pane's corner, sitting
+ * outside the pane so it covers no text. The tile has a margin on the sides
+ * facing the chrome and none on the side facing the pane.
+ */
+function drawCornerMarkers(ctx, pane, mk) {
+  const a = mk.armPx;
+  const t = mk.thickPx;
+  const m = mk.marginPx;
+  const tileW = a + 2 * m;
+  const tileH = a + m;
+
+  for (const corner of ["tl", "tr", "bl", "br"]) {
+    const top = corner[0] === "t";
+    const left = corner[1] === "l";
+
+    const originX = left ? pane.left - m : pane.right - a - m;
+    const originY = top ? pane.top - a - m : pane.bottom;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(originX, originY, tileW, tileH);
+
+    const x0 = m;
+    const y0 = top ? m : 0;
+    const armY = top ? y0 + a - t : y0;
+    const armX = left ? x0 : x0 + a - t;
+
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(originX + x0, originY + armY, a, t);
+    ctx.fillRect(originX + armX, originY + y0, t, a);
+  }
+}
+
 /** Word wrap, as an editor does it: break at a space where possible, mid-token when not. */
 function wrapLine(line, columns) {
   if (line.length <= columns) return [line];
@@ -114,25 +156,38 @@ window.render = async (opts) => {
   const digits = String(lines.length).length;
   // Notepad++ sizes the line number margin to fit the widest number, plus padding.
   const gutterPad = Math.round(gutterAdvance * 0.6);
-  const gutterRightEdgeX = Math.round(gutterPad * 2 + digits * gutterAdvance);
+  const gutterWidth = Math.round(gutterPad * 2 + digits * gutterAdvance);
 
-  const chromeTop = Math.round(opts.lineHeight * 2.2);   // menu bar + tab bar
-  const chromeBottom = Math.round(opts.lineHeight * 1.3); // status bar
+  const mk = opts.markerGeometry;
+  const drawMarkers = Boolean(opts.markers);
+
+  // A marker reaches ARM + MARGIN above the pane and the same below it, so the
+  // chrome has to be at least that deep for one to sit over it.
+  const minChrome = drawMarkers ? mk.armPx + mk.marginPx + 4 : 0;
+  const chromeTop = Math.max(minChrome, Math.round(opts.lineHeight * 2.2));   // menu bar + tab bar
+  const chromeBottom = Math.max(minChrome, Math.round(opts.lineHeight * 1.3)); // status bar
+
+  // The pane is the gutter and the text, inset from the window's own edge and
+  // with the scrollbar outside it.
+  const paneLeft = drawMarkers ? mk.marginPx + 4 : 0;
+  const scrollbar = drawMarkers ? 14 : 0;
+  const paneRight = c.width - scrollbar - (drawMarkers ? mk.marginPx + 4 : 0);
   const bodyTopY = chromeTop;
   const bodyBottomY = opts.height - chromeBottom;
 
   ctx.fillStyle = "${CHROME}";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = "${PAPER}";
-  ctx.fillRect(0, bodyTopY, c.width, bodyBottomY - bodyTopY);
+  ctx.fillRect(paneLeft, bodyTopY, paneRight - paneLeft, bodyBottomY - bodyTopY);
   ctx.fillStyle = "${GUTTER}";
-  ctx.fillRect(0, bodyTopY, gutterRightEdgeX, bodyBottomY - bodyTopY);
+  ctx.fillRect(paneLeft, bodyTopY, gutterWidth, bodyBottomY - bodyTopY);
 
   // Baseline placement inside the line box, same for gutter and text.
   const leading = opts.lineHeight - (ascent + descent);
   const baselineOffset = leading / 2 + ascent;
 
-  const columns = Math.floor((c.width - gutterRightEdgeX) / advance);
+  const gutterRightEdgeX = paneLeft + gutterWidth;
+  const columns = Math.floor((paneRight - gutterRightEdgeX) / advance);
 
   // Lay the text out as the editor would: one display row per line, or several
   // when wrap is on and a line is too wide. Only the first row of a line gets a
@@ -168,10 +223,15 @@ window.render = async (opts) => {
     }
     for (let col = 0; col < row.text.length; col++) {
       const x = gutterRightEdgeX + col * advance;
-      if (x > c.width) break;
+      if (x + advance > paneRight) break;
       ctx.fillText(row.text[col], x, baseline);
     }
   });
+
+  const paneRect = { left: paneLeft, top: bodyTopY, right: paneRight, bottom: bodyBottomY };
+  if (drawMarkers) {
+    drawCornerMarkers(ctx, paneRect, mk);
+  }
 
   const lineCount = visibleRows.length > 0 ? visibleRows[visibleRows.length - 1].line + 1 : 0;
 
@@ -196,6 +256,9 @@ window.render = async (opts) => {
       wrapped: Boolean(opts.wrap),
       gutterFont: opts.gutterFont ?? null,
       gutterAdvancePx: gutterAdvance,
+      /** The pane the markers surround: the gutter and the text, without the scrollbar. */
+      paneRect: drawMarkers ? paneRect : null,
+      textAreaRightX: paneRight,
     },
   };
 };
@@ -219,6 +282,7 @@ for (const spec of CASES) {
       text,
       fontDataUrl,
       gutterFontDataUrl: spec.gutterFont ? dataUrl(GUTTER_FONTS[spec.gutterFont]) : null,
+      markerGeometry: MARKERS,
     }
   );
 

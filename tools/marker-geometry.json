@@ -1,0 +1,6 @@
+{
+  "_doc": "The corner markers' geometry, shared by overlay.py, the fixture renderer and the detector. See tools/README.md. Pixels at 100% display scaling; the overlay scales them by the pane's DPI.",
+  "armPx": 40,
+  "thickPx": 8,
+  "marginPx": 6
+}

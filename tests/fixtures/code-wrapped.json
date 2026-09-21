@@ -104,6 +104,8 @@
     "fontPx": 19,
     "wrapped": true,
     "gutterFont": null,
-    "gutterAdvancePx": 11.1328125
+    "gutterAdvancePx": 11.1328125,
+    "paneRect": null,
+    "textAreaRightX": 560
   }
 }

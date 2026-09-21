@@ -89,6 +89,8 @@
     "fontPx": 19,
     "wrapped": false,
     "gutterFont": "courier-prime",
-    "gutterAdvancePx": 11.392578125
+    "gutterAdvancePx": 11.392578125,
+    "paneRect": null,
+    "textAreaRightX": 900
   }
 }
