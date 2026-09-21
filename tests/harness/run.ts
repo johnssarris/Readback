@@ -92,7 +92,8 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   const warped = warpImageData(image, image.width, image.height, corners, DEST_WIDTH, destHeight);
   const rectified = makeImageData(warped.width, warped.height, warped.data);
 
-  const margins = detectMargins(rectified);
+  // Markers name the pane itself, so what was rectified has no chrome in it.
+  const margins = detectMargins(rectified, markers ? "pane" : "window");
   const pitch = calibrateCellPitch(rectified, margins);
 
   // Truth is recorded in the drawn image's own coordinates. What was rectified

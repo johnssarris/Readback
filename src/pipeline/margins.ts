@@ -35,23 +35,32 @@ const BOUNDARY_SPAN = 4;
  *  to avoid tripping on the rectified window's own outer border. */
 const EDGE_SKIP_FRACTION = 0.01;
 
+/** What the rectified image contains, which decides how much of it has to be found. */
+export type Framing = "window" | "pane";
+
 /**
- * Locates the editor body (excluding tab bar / status bar / menu bar) via a horizontal
- * color-band scan, then locates the gutter/text-area boundary via a vertical scan within
- * the body. Assumes whole-window framing (see plan: Design decisions).
+ * Locates the editor body via a horizontal colour-band scan, then the
+ * gutter/text-area boundary via a vertical scan within it.
  *
  * Both scans read the page colour behind the text (see PROFILE_PERCENTILE) rather
  * than the average brightness of each line, so the boundaries they find are the
  * window's own regions and not the shape of whatever happens to be on screen.
+ *
+ * The row scan exists to find the editor between the menu bar, the tab bar and
+ * the status bar, and it is only needed when those are in the picture. Framed
+ * by the corner markers they are not: the image is the pane, top to bottom, and
+ * looking for a band inside it can only find something narrower than the truth.
  */
-export function detectMargins(image: ImageData): MarginBounds {
+export function detectMargins(image: ImageData, framing: Framing = "window"): MarginBounds {
   const { width, height } = image;
 
-  const rowLum = new Array(height);
-  for (let y = 0; y < height; y++) rowLum[y] = rowLuminance(image, y, 0, width, PROFILE_PERCENTILE);
-
-  const rowBoundaries = findBoundaries(rowLum);
-  const [bodyTopY, bodyBottomY] = tallestBand(rowBoundaries, height);
+  let bodyTopY = 0;
+  let bodyBottomY = height;
+  if (framing === "window") {
+    const rowLum = new Array(height);
+    for (let y = 0; y < height; y++) rowLum[y] = rowLuminance(image, y, 0, width, PROFILE_PERCENTILE);
+    [bodyTopY, bodyBottomY] = tallestBand(findBoundaries(rowLum), height);
+  }
 
   const colLum = new Array(width);
   for (let x = 0; x < width; x++) colLum[x] = colLuminance(image, x, bodyTopY, bodyBottomY, PROFILE_PERCENTILE);

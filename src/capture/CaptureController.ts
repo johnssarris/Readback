@@ -1,6 +1,6 @@
 import { estimateAspectRatio, warpPerspective, type Point } from "../pipeline/rectify";
 import { detectMarkerQuad } from "../pipeline/markers";
-import { detectMargins, type MarginBounds } from "../pipeline/margins";
+import { detectMargins, type Framing, type MarginBounds } from "../pipeline/margins";
 import { calibrateCellPitch, type CellPitch } from "../pipeline/calibrate";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
 import { buildRows, rowsToText } from "../model/lineIndex";
@@ -307,13 +307,13 @@ export class CaptureController {
     const destHeight = Math.round(destWidth / aspect);
 
     const rectified = warpPerspective(this.frame, this.frame.width, this.frame.height, srcCorners, destWidth, destHeight);
-    this.showResult(rectified);
+    this.showResult(rectified, this.fromMarkers ? "pane" : "window");
   }
 
-  private showResult(canvas: HTMLCanvasElement): void {
+  private showResult(canvas: HTMLCanvasElement, framing: Framing): void {
     this.stop();
 
-    const pipelineResult = this.runDebugPipeline(canvas);
+    const pipelineResult = this.runDebugPipeline(canvas, framing);
 
     this.resultView = document.createElement("div");
     this.resultView.className = "result-view";
@@ -347,7 +347,7 @@ export class CaptureController {
    * checked visually against a real photo. Returns a short text summary plus the detected
    * bounds/pitch for the M3 recognition pass below.
    */
-  private runDebugPipeline(canvas: HTMLCanvasElement): {
+  private runDebugPipeline(canvas: HTMLCanvasElement, framing: Framing): {
     summary: string;
     margins: MarginBounds | null;
     pitch: CellPitch | null;
@@ -360,7 +360,7 @@ export class CaptureController {
     let pitch: CellPitch | null = null;
 
     try {
-      margins = detectMargins(imageData);
+      margins = detectMargins(imageData, framing);
       lines.push(`body: y ${margins.bodyTopY}–${margins.bodyBottomY}`);
       lines.push(`gutter edge: x=${margins.gutterRightEdgeX}, text right: x=${margins.textAreaRightX}`);
 
