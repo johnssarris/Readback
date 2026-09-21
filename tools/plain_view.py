@@ -19,7 +19,7 @@ What "on" does:
   - hides the bookmark, fold, and change-history margins (keeps line numbers)
   - resets zoom, turns off whitespace symbols, EOL markers, indent guides,
     and the edge line
-  - sets word wrap per the WRAP setting below
+  - turns on word wrap, so nothing runs off the right edge (WRAP below)
 
 What "off" does:
   - switches back to the original language, which makes Notepad++ reapply
@@ -75,13 +75,11 @@ INK = 0x000000           # text color, as 0xBBGGRR
 PAPER = 0xFFFFFF         # background color, as 0xBBGGRR
 GUTTER = 0xE0E0E0        # line number margin background, as 0xBBGGRR
 TEXT_GAP = 0             # pixels between line numbers and text
-# Word wrap. False for now: Readback reads one row per line number, so a
-# wrapped continuation row - which Notepad++ leaves numberless - is dropped.
-# That's a stopgap, and it trades one loss for another: with wrap off, a line
-# wider than the window runs off the right edge and is lost just as silently.
-# Set back to True once the pipeline detects rows from the text area and
-# treats numberless rows as continuations.
-WRAP = False
+# Word wrap. On: the pipeline finds rows from ink across the whole body and
+# treats a numberless row as a continuation of the one above, so a wrapped
+# line is read and put back together. With wrap off, a line wider than the
+# window runs off the right edge and is lost silently instead.
+WRAP = True
 STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
 STATE_VERSION = 2        # bump if the saved state format changes
 
