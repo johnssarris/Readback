@@ -1,4 +1,4 @@
-import { luminance, percentile, type Rect } from "./imageUtils";
+import { inkThreshold, luminance, type Rect } from "./imageUtils";
 import type { MarginBounds } from "./margins";
 import { normalizedCrossCorrelation, type GlyphAtlas } from "./match";
 
@@ -14,10 +14,6 @@ import { normalizedCrossCorrelation, type GlyphAtlas } from "./match";
  * their shape alone - each one scaled to a common size before it is compared,
  * so a narrow face and a wide one ask the same question.
  */
-
-/** Ink is this far below the margin's own page brightness, read at this percentile. */
-const PAGE_PERCENTILE = 0.9;
-const INK_FRACTION_OF_PAGE = 0.55;
 
 /** Size every digit - found or template - is normalised to before comparison. */
 const NORM_WIDTH = 16;
@@ -97,7 +93,7 @@ function gutterInk(image: ImageData, margins: MarginBounds, row: { top: number; 
     }
   }
 
-  const threshold = percentile(Array.from(pixels), PAGE_PERCENTILE) * INK_FRACTION_OF_PAGE;
+  const threshold = inkThreshold(Array.from(pixels));
 
   const inked: boolean[] = [];
   for (let x = 0; x < width; x++) {

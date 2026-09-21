@@ -1,4 +1,4 @@
-import { findRuns, luminance, median, otsuThreshold, percentile } from "./imageUtils";
+import { findRuns, inkThreshold, luminance, median, otsuThreshold } from "./imageUtils";
 import type { MarginBounds } from "./margins";
 
 export interface CellPitch {
@@ -67,10 +67,6 @@ const BAND_THRESHOLD = 0.15;
 
 /** Share of a typical row's ink that separates a row with only a line number on it from noise. */
 const MIN_ROW_INK_SHARE = 0.02;
-
-/** Where in a row's own brightness the page colour is read, and how far below it ink sits. */
-const PAGE_PERCENTILE = 0.75;
-const INK_FRACTION_OF_PAGE = 0.55;
 
 /**
  * A line number's ink is at least this tall, as a share of the line spacing -
@@ -373,8 +369,7 @@ function rowInkProfile(image: ImageData, margins: MarginBounds): number[] {
       row[x - x0] = luminance(image.data[i], image.data[i + 1], image.data[i + 2]);
     }
 
-    const page = percentile(row, PAGE_PERCENTILE);
-    const threshold = page * INK_FRACTION_OF_PAGE;
+    const threshold = inkThreshold(row);
     let count = 0;
     for (const value of row) if (value <= threshold) count++;
     counts[y - y0] = count > limit ? 0 : count;
