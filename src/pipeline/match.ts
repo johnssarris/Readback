@@ -51,9 +51,20 @@ const CANDIDATE_LIMIT = 5;
  * on correlation even against a blank cell. The contrast between a cell's
  * darkest and brightest pixel settles it instead: any glyph, however light,
  * puts ink well below the page it sits on, while a blank cell varies only by
- * sensor noise and whatever bleeds in from its neighbours.
+ * sensor noise.
  */
 export const BLANK_CONTRAST = 48;
+
+/**
+ * Share of a cell's width the blank test looks at, centred.
+ *
+ * A wide glyph's ink reaches the edge of its own cell and, once a photograph
+ * has blurred it, a little way into the next one. Measured across the whole
+ * cell that borrowed ink is contrast, and a space beside an m or a W stops
+ * reading as blank - it comes back as r, W, a or {, whichever template the
+ * fringe happens to suit. The middle of a cell belongs to that cell alone.
+ */
+const BLANK_REGION = 0.6;
 
 /** Builds a runtime glyph atlas (grayscale bitmaps) from the generated sprite sheet + manifest. */
 export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasManifest): GlyphAtlas {
@@ -115,13 +126,20 @@ export function normalizedCrossCorrelation(a: Float32Array, b: Float32Array): nu
   return numerator / denom;
 }
 
-/** Difference between a cell's darkest and brightest pixel. */
-function contrastOf(cell: Float32Array): number {
+/** Difference between the darkest and brightest pixel in the middle of a cell. */
+function centreContrast(cell: Float32Array, width: number, height: number): number {
+  const inset = Math.floor((width * (1 - BLANK_REGION)) / 2);
+  const from = Math.min(inset, Math.floor((width - 1) / 2));
+  const to = width - from;
+
   let min = Infinity;
   let max = -Infinity;
-  for (const v of cell) {
-    if (v < min) min = v;
-    if (v > max) max = v;
+  for (let y = 0; y < height; y++) {
+    for (let x = from; x < to; x++) {
+      const v = cell[y * width + x];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
   }
   return max - min;
 }
@@ -134,7 +152,7 @@ function contrastOf(cell: Float32Array): number {
 export function matchCell(image: ImageData, cellRect: Rect, atlas: GlyphAtlas): MatchResult {
   const resampled = resampleToGray(image, cellRect, atlas.cellWidth, atlas.cellHeight);
 
-  if (contrastOf(resampled) < BLANK_CONTRAST) {
+  if (centreContrast(resampled, atlas.cellWidth, atlas.cellHeight) < BLANK_CONTRAST) {
     return { char: " ", confidence: 1, candidates: [{ char: " ", score: 1 }], flagged: false };
   }
 
