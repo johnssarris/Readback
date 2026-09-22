@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { calibrateCellPitch, type CellPitch } from "../../src/pipeline/calibrate";
-import { detectMargins, type MarginBounds } from "../../src/pipeline/margins";
+import type { MarginBounds } from "../../src/pipeline/margins";
+import { analyzeCapture } from "../../src/pipeline/analyze";
 import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "../../src/pipeline/match";
 import {
   applyHomography,
@@ -13,7 +14,7 @@ import {
   type Point,
 } from "../../src/pipeline/rectify";
 import { inspectMarkers, type MarkerReport } from "../../src/pipeline/markers";
-import { buildRows, rowsToText } from "../../src/model/lineIndex";
+import { rowsToText } from "../../src/model/lineIndex";
 import { photograph, type CameraOptions } from "./degrade";
 import type { Fixture } from "./cases";
 import { makeImageData } from "./image";
@@ -101,8 +102,12 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   const rectified = makeImageData(warped.width, warped.height, warped.data);
 
   // Markers name the pane itself, so what was rectified has no chrome in it.
-  const margins = detectMargins(rectified, markers ? "pane" : "window");
-  const pitch = calibrateCellPitch(rectified, margins);
+  // The same call the app makes, so what is measured is what the app reads.
+  const atlas = loadAtlas();
+  const analysis = analyzeCapture(rectified, markers ? "pane" : "window", atlas);
+  if (!analysis.margins) throw new Error(analysis.summary.join("; "));
+  const margins = analysis.margins;
+  const pitch = analysis.pitch ?? calibrateCellPitch(rectified, margins);
 
   // Truth is recorded in the drawn image's own coordinates. What was rectified
   // is the pane when markers named it, and the whole window otherwise, so the
@@ -132,9 +137,8 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   }
 
   let text: string | null = null;
-  const atlas = loadAtlas();
-  if (atlas && Number.isFinite(pitch.widthPx) && pitch.widthPx > 0 && pitch.rowYCenters.length > 0) {
-    const rows = buildRows(rectified, margins, pitch, atlas);
+  const rows = analysis.rows;
+  if (rows) {
     text = rowsToText(rows);
     metrics.cer = characterErrorRate(text, fixture.lines.join("\n"));
 

@@ -1,10 +1,11 @@
-import { estimateAspectRatio, warpPerspective, type Point } from "../pipeline/rectify";
+import { estimateAspectRatio, warpImageData, type Point } from "../pipeline/rectify";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
-import { detectMargins, type Framing, type MarginBounds } from "../pipeline/margins";
-import { calibrateCellPitch, type CellPitch } from "../pipeline/calibrate";
+import type { Framing } from "../pipeline/margins";
+import { analyzeCapture } from "../pipeline/analyze";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
-import { buildRows, rowsToText } from "../model/lineIndex";
+import { rowsToText, type LineRow } from "../model/lineIndex";
+import { drawDebugOverlay } from "./debugOverlay";
 
 const MARGIN_FRACTION = 0.12;
 
@@ -371,23 +372,45 @@ export class CaptureController {
     const destWidth = 1600;
     const destHeight = Math.round(destWidth / aspect);
 
-    const rectified = warpPerspective(this.frame, this.frame.width, this.frame.height, srcCorners, destWidth, destHeight);
-    this.showResult(rectified, this.fromMarkers ? "pane" : "window");
+    const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
+    const source = ctx.getImageData(0, 0, this.frame.width, this.frame.height);
+    const warped = warpImageData(source, source.width, source.height, srcCorners, destWidth, destHeight);
+    const rectified = new ImageData(warped.data as Uint8ClampedArray<ArrayBuffer>, warped.width, warped.height);
+    void this.showResult(rectified, this.fromMarkers ? "pane" : "window");
   }
 
-  private showResult(canvas: HTMLCanvasElement, framing: Framing): void {
+  /**
+   * Reads the rectified capture and shows what was read.
+   *
+   * The pixels are read once, as they came out of the warp, and nothing is ever
+   * drawn on them: the grid and margins go on a transparent canvas laid over
+   * the one showing the capture, so looking at the result cannot change it.
+   */
+  private async showResult(rectified: ImageData, framing: Framing): Promise<void> {
     this.stop();
-
-    const pipelineResult = this.runDebugPipeline(canvas, framing);
 
     this.resultView = document.createElement("div");
     this.resultView.className = "result-view";
 
+    const stack = document.createElement("div");
+    stack.className = "result-stack";
+
+    const canvas = document.createElement("canvas");
     canvas.className = "result-canvas";
+    canvas.width = rectified.width;
+    canvas.height = rectified.height;
+    canvas.getContext("2d")!.putImageData(rectified, 0, 0);
+
+    const overlay = document.createElement("canvas");
+    overlay.className = "result-overlay";
+    overlay.width = rectified.width;
+    overlay.height = rectified.height;
+
+    stack.append(canvas, overlay);
 
     const info = document.createElement("pre");
     info.className = "debug-info";
-    info.textContent = pipelineResult.summary;
+    info.textContent = "Reading…";
 
     const recognized = document.createElement("pre");
     recognized.className = "recognized-text";
@@ -395,111 +418,30 @@ export class CaptureController {
 
     const retakeBtn = button("Retake", "retake-btn", () => this.restart());
 
-    this.resultView.append(canvas, info, recognized, retakeBtn);
+    this.resultView.append(stack, info, recognized, retakeBtn);
     this.root.innerHTML = "";
     this.root.appendChild(this.resultView);
 
-    if (pipelineResult.margins && pipelineResult.pitch) {
-      this.runRecognition(canvas, pipelineResult.margins, pipelineResult.pitch, recognized);
-    } else {
-      recognized.textContent = "Recognition skipped: margin/calibration detection failed.";
-    }
-  }
-
-  /**
-   * M2 debug pass: runs margin detection + self-calibration on the rectified capture and
-   * draws the detected bounds/grid directly onto the result canvas, so alignment can be
-   * checked visually against a real photo. Returns a short text summary plus the detected
-   * bounds/pitch for the M3 recognition pass below.
-   */
-  private runDebugPipeline(canvas: HTMLCanvasElement, framing: Framing): {
-    summary: string;
-    margins: MarginBounds | null;
-    pitch: CellPitch | null;
-  } {
-    const ctx = canvas.getContext("2d")!;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    const lines: string[] = [];
-    let margins: MarginBounds | null = null;
-    let pitch: CellPitch | null = null;
-
-    try {
-      margins = detectMargins(imageData, framing);
-      lines.push(`body: y ${margins.bodyTopY}–${margins.bodyBottomY}`);
-      lines.push(`gutter edge: x=${margins.gutterRightEdgeX}, text right: x=${margins.textAreaRightX}`);
-
-      ctx.save();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#f97316";
-      ctx.beginPath();
-      ctx.moveTo(0, margins.bodyTopY);
-      ctx.lineTo(canvas.width, margins.bodyTopY);
-      ctx.moveTo(0, margins.bodyBottomY);
-      ctx.lineTo(canvas.width, margins.bodyBottomY);
-      ctx.stroke();
-
-      ctx.strokeStyle = "#22d3ee";
-      ctx.beginPath();
-      ctx.moveTo(margins.gutterRightEdgeX, margins.bodyTopY);
-      ctx.lineTo(margins.gutterRightEdgeX, margins.bodyBottomY);
-      ctx.moveTo(margins.textAreaRightX, margins.bodyTopY);
-      ctx.lineTo(margins.textAreaRightX, margins.bodyBottomY);
-      ctx.stroke();
-
-      pitch = calibrateCellPitch(imageData, margins);
-      lines.push(
-        `cell pitch: ${pitch.widthPx.toFixed(1)} x ${pitch.heightPx.toFixed(1)} px, rows detected: ${pitch.rowYCenters.length}`
-      );
-
-      if (Number.isFinite(pitch.widthPx) && Number.isFinite(pitch.heightPx) && pitch.rowYCenters.length > 0) {
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.5)";
-        ctx.beginPath();
-        for (const yCenter of pitch.rowYCenters) {
-          const top = yCenter - pitch.heightPx / 2;
-          ctx.moveTo(pitch.columnOriginX, top);
-          ctx.lineTo(margins.textAreaRightX, top);
-        }
-        for (let x = pitch.columnOriginX; x < margins.textAreaRightX; x += pitch.widthPx) {
-          ctx.moveTo(x, margins.bodyTopY);
-          ctx.lineTo(x, margins.bodyBottomY);
-        }
-        ctx.stroke();
-      } else {
-        lines.push("grid not drawn: calibration did not resolve a usable cell pitch");
-        pitch = null;
-      }
-      ctx.restore();
-    } catch (err) {
-      lines.push(`pipeline error: ${(err as Error).message}`);
-      margins = null;
-      pitch = null;
-    }
-    return { summary: lines.join("\n"), margins, pitch };
-  }
-
-  /**
-   * M3: loads the glyph atlas (if generated — see public/tools/atlas-generator.html) and runs
-   * full recognition, rendering the reconstructed text with flagged cells highlighted.
-   */
-  private async runRecognition(
-    canvas: HTMLCanvasElement,
-    margins: MarginBounds,
-    pitch: CellPitch,
-    target: HTMLElement
-  ): Promise<void> {
     const atlas = await loadAtlasAssets();
-    if (!atlas) {
-      target.textContent =
-        "No glyph atlas found at /atlas/. Generate one with npm run atlas and place atlas.png + atlas-manifest.json under public/atlas/.";
-      return;
+    const analysis = analyzeCapture(rectified, framing, atlas);
+
+    info.textContent = analysis.summary.join("\n");
+    if (analysis.margins) {
+      drawDebugOverlay(overlay.getContext("2d")!, rectified, analysis.margins, analysis.pitch);
     }
 
-    const ctx = canvas.getContext("2d")!;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const rows = buildRows(imageData, margins, pitch, atlas);
+    if (!analysis.margins || !analysis.pitch) {
+      recognized.textContent = "Recognition skipped: margin/calibration detection failed.";
+    } else if (!atlas) {
+      recognized.textContent =
+        "No glyph atlas found at /atlas/. Generate one with npm run atlas and place atlas.png + atlas-manifest.json under public/atlas/.";
+    } else {
+      this.renderRows(analysis.rows ?? [], recognized);
+    }
+  }
 
+  /** The recognized text, a line per row, with the cells it was unsure of marked. */
+  private renderRows(rows: LineRow[], target: HTMLElement): void {
     target.innerHTML = "";
     for (const row of rows) {
       const lineEl = document.createElement("div");

@@ -147,37 +147,6 @@ export function warpImageData(
   return { width: destWidth, height: destHeight, data: out };
 }
 
-/**
- * Warps `source` (mapping its `srcCorners` quad to a flat destWidth x destHeight
- * rectangle) into a new canvas.
- */
-export function warpPerspective(
-  source: CanvasImageSource,
-  sourceWidth: number,
-  sourceHeight: number,
-  srcCorners: Point[],
-  destWidth: number,
-  destHeight: number
-): HTMLCanvasElement {
-  const srcCanvas = document.createElement("canvas");
-  srcCanvas.width = sourceWidth;
-  srcCanvas.height = sourceHeight;
-  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
-  srcCtx.drawImage(source, 0, 0, sourceWidth, sourceHeight);
-  const srcData = srcCtx.getImageData(0, 0, sourceWidth, sourceHeight);
-
-  const warped = warpImageData(srcData, sourceWidth, sourceHeight, srcCorners, destWidth, destHeight);
-
-  const destCanvas = document.createElement("canvas");
-  destCanvas.width = destWidth;
-  destCanvas.height = destHeight;
-  const destCtx = destCanvas.getContext("2d")!;
-  const destData = destCtx.createImageData(destWidth, destHeight);
-  destData.data.set(warped.data);
-  destCtx.putImageData(destData, 0, 0);
-  return destCanvas;
-}
-
 function bilinearSample(
   data: ImageData,
   width: number,
