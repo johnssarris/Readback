@@ -35,6 +35,9 @@ const INTRUSION_PX = 1;
 /** Times the edge along the pane is refitted with the pane's ink taken out. */
 const ENVELOPE_PASSES = 4;
 
+/** How far inside the upright arm's outer edge a point must be to belong to the other edge. */
+const INSIDE_PX = 0.5;
+
 /** The four are drawn the same size; a tilted shot may still show them this much apart. */
 const SIZE_AGREEMENT = 1.6;
 
@@ -623,21 +626,36 @@ function fitCorner(blob: Blob, corner: Corner): Fit {
   // last line of text, cut off by the pane's bottom edge, is the usual one -
   // can blur into the arm lying along that edge, and is always on that side.
   const paneSide = alongTop ? -1 : 1;
-  const a = fitAlongPane(trim(horizontal), paneSide);
 
-  // The other arm runs away from the pane, so a row on the pane's side of the
-  // first edge is not part of it, whatever ink the blob took in there.
-  const vertical: Point[] = [];
+  const allVertical: Point[] = [];
   const height = blob.maxY - blob.minY + 1;
   for (let i = 0; i < height; i++) {
     const x = alongLeft ? blob.leftOf[i] : blob.rightOf[i];
-    if (x < 0) continue;
-    const point = { x, y: blob.minY + i };
-    if (a && beyond(a, point) * paneSide > INTRUSION_PX) continue;
-    vertical.push(point);
+    if (x >= 0) allVertical.push({ x, y: blob.minY + i });
   }
 
-  const b = fitLine(trim(vertical));
+  // The other arm runs away from the pane, so a row on the pane's side of the
+  // first edge is not part of it, whatever ink the blob took in there.
+  const uprightEdge = (along: Line | null) =>
+    fitLine(trim(allVertical.filter((p) => !along || beyond(along, p) * paneSide <= INTRUSION_PX)));
+
+  // And a column that reaches the upright arm's outer edge is not part of the
+  // first: its outermost ink is that arm's, not this one's. A marker
+  // photographed at an angle has that arm leaning out past the corner, and the
+  // last few columns' outermost ink runs up its slanted side - 3 to 36 pixels
+  // off the edge on one capture, which tilted it seventeen degrees, enough for
+  // the real marker to fail the test that it lies along the pane. Worse,
+  // measured from that tilted line, the edge's own pixels at that end look
+  // like the pane's and are the ones taken out. So both edges are fitted once,
+  // the columns reaching the upright edge dropped, and both fitted again.
+  const outerSide = alongLeft ? -1 : 1;
+  let a = fitAlongPane(trim(horizontal), paneSide);
+  let b = uprightEdge(a);
+  if (b) {
+    const upright = b;
+    a = fitAlongPane(trim(horizontal).filter((p) => rightOf(upright, p) * outerSide < -INSIDE_PX), paneSide);
+    b = uprightEdge(a);
+  }
   const crossing = a && b ? intersect(a, b) : null;
 
   const found = crossing ?? {
@@ -744,6 +762,13 @@ function fitLine(points: Point[]): Line | null {
   // larger eigenvalue.
   const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
   return { point: { x: mx, y: my }, dx: Math.cos(theta), dy: Math.sin(theta) };
+}
+
+/** How far right of a near-vertical line a point is, in pixels; negative left of it. */
+function rightOf(line: Line, p: Point): number {
+  // The normal that points across the image to the right, whichever way the fit ran.
+  const flip = line.dy < 0 ? -1 : 1;
+  return flip * ((p.x - line.point.x) * line.dy - (p.y - line.point.y) * line.dx);
 }
 
 function intersect(a: Line, b: Line): Point | null {
