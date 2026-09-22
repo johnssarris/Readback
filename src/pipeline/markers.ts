@@ -32,11 +32,11 @@ const EDGE_TRIM = 0.1;
 /** The four are drawn the same size; a tilted shot may still show them this much apart. */
 const SIZE_AGREEMENT = 1.6;
 
-/** A pane smaller than this share of the frame was not what the shot was of. */
-const MIN_PANE_FRACTION = 0.25;
+/** A pane covering less than this share of the frame was not what the shot was of. */
+const MIN_PANE_FRACTION = 0.1;
 
-/** How far apart, in marker widths, two markers must be for their order to be clear. */
-const SEPARATION = 1;
+/** Candidates tried per corner, from the largest down, against each anchor. */
+const PER_CORNER_TRIES = 4;
 
 const NEIGHBOURS: Array<[number, number]> = [
   [1, 0],
@@ -73,24 +73,121 @@ interface Blob {
  * are there to be found.
  */
 export function detectMarkerQuad(image: ImageData): MarkerQuad | null {
-  const candidates = findMarkers(image);
-  if (candidates.length < 4) return null;
-
-  // Where the four sit relative to each other says which corner each one is,
-  // and that is the reading to trust while it is clear. When it is not - a shot
-  // tilted far enough that two of them are level, and which is the top pair
-  // becomes a coin toss - the shape of the L says the same thing independently,
-  // and it breaks the tie.
-  const four = candidates.length > 4 ? bestPerShape(candidates) : candidates;
-  if (!four || four.length !== 4) return null;
-
-  const assignment = assignByPosition(four) ?? assignByShape(four);
+  const assignment = chooseQuad(findMarkers(image), image.width, image.height);
   if (!assignment) return null;
-
-  if (!plausiblePane(assignment, image.width, image.height)) return null;
 
   const corners = CORNERS.map((corner) => fitCorner(assignment[corner], corner));
   return { corners: corners as [Point, Point, Point, Point], found: 4 };
+}
+
+/**
+ * Picks the four candidates that are the markers, out of however many pieces of
+ * the frame happened to be L-shaped.
+ *
+ * The four cannot be recognised one at a time. A photographed marker is blurred,
+ * compressed and thresholded until its arms are thinner than they were drawn,
+ * while the editor is full of crisp glyphs - an L, a J, a 7 - that are better
+ * L's than it is by every measure a single blob offers. Score them individually
+ * and the best candidate for a corner is reliably a letter: on the photo
+ * fixtures the real markers rank second, second, fifth and tenth of their
+ * corner groups. Whichever way the tie is broken, one wrong pick is enough.
+ *
+ * What the markers have that scattered text does not is each other. They are
+ * drawn the same size, one to a corner, around a pane - so the four are tested
+ * as a set, and no blob is judged a marker on its own account at all.
+ *
+ * The search runs largest first, which needs no justifying beyond what the
+ * markers are: they are drawn around the pane, so any four pieces of text that
+ * happen to form a quad form a smaller one, inside it.
+ */
+function chooseQuad(
+  candidates: Array<{ blob: Blob; corner: Corner }>,
+  width: number,
+  height: number
+): Record<Corner, Blob> | null {
+  if (candidates.length < 4) return null;
+
+  // Each corner's candidates, largest first, sorted once: every size window
+  // below is then a slice of one of these rather than a pass over all of them.
+  const byCorner = {} as Record<Corner, Sized[]>;
+  for (const corner of CORNERS) byCorner[corner] = [];
+  for (const candidate of candidates) {
+    byCorner[candidate.corner].push({ blob: candidate.blob, side: sideOf(candidate.blob) });
+  }
+  for (const corner of CORNERS) {
+    if (byCorner[corner].length === 0) return null;
+    byCorner[corner].sort((a, b) => b.side - a.side);
+  }
+
+  const anchors = CORNERS.flatMap((corner) => byCorner[corner].map((c) => ({ ...c, corner })));
+  anchors.sort((a, b) => b.side - a.side);
+
+  for (const anchor of anchors) {
+    // Nothing larger than the anchor, since the anchor is the quad's largest
+    // member and every larger candidate has already had its turn as one.
+    const floor = anchor.side / SIZE_AGREEMENT;
+    const choices = CORNERS.map((corner) =>
+      corner === anchor.corner ? [anchor] : window(byCorner[corner], floor, anchor.side)
+    );
+    if (choices.some((list) => list.length === 0)) continue;
+
+    for (const [tl, tr, br, bl] of combinations(choices)) {
+      const assignment = { tl: tl.blob, tr: tr.blob, br: br.blob, bl: bl.blob };
+      if (plausiblePane(assignment, width, height)) return assignment;
+    }
+  }
+  return null;
+}
+
+interface Sized {
+  blob: Blob;
+  side: number;
+}
+
+/**
+ * The largest few candidates whose size is within the anchor's, from a list
+ * already sorted largest first.
+ *
+ * Largest rather than best-shaped, deliberately: shape is what got every
+ * candidate this far and it cannot separate a marker from a letter. Size can -
+ * the markers are drawn at one size around the pane, and text is smaller than
+ * they are.
+ */
+function window(sorted: Sized[], floor: number, ceiling: number): Sized[] {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (sorted[mid].side > ceiling) low = mid + 1;
+    else high = mid;
+  }
+
+  const picked: Sized[] = [];
+  for (let i = low; i < sorted.length && picked.length < PER_CORNER_TRIES; i++) {
+    if (sorted[i].side < floor) break;
+    picked.push(sorted[i]);
+  }
+  return picked;
+}
+
+/** Every way of taking one from each list, best-scoring combinations first. */
+function* combinations<T>(lists: T[][]): Generator<T[]> {
+  const counts = lists.map((list) => list.length);
+  const total = counts.reduce((a, b) => a * b, 1);
+  for (let i = 0; i < total; i++) {
+    let rest = i;
+    const pick: T[] = [];
+    for (let k = 0; k < lists.length; k++) {
+      pick.push(lists[k][rest % counts[k]]);
+      rest = Math.floor(rest / counts[k]);
+    }
+    yield pick;
+  }
+}
+
+/** The longer side of a blob's bounding box: what "the same size" is measured on. */
+function sideOf(blob: Blob): number {
+  return Math.max(blob.maxX - blob.minX, blob.maxY - blob.minY) + 1;
 }
 
 /**
@@ -103,10 +200,7 @@ export function detectMarkerQuad(image: ImageData): MarkerQuad | null {
  * been worth photographing.
  */
 function plausiblePane(assignment: Record<Corner, Blob>, width: number, height: number): boolean {
-  const sides = CORNERS.map((c) => {
-    const blob = assignment[c];
-    return Math.max(blob.maxX - blob.minX, blob.maxY - blob.minY) + 1;
-  });
+  const sides = CORNERS.map((c) => sideOf(assignment[c]));
   if (Math.max(...sides) / Math.min(...sides) > SIZE_AGREEMENT) return false;
 
   const centre = (blob: Blob) => ({ x: (blob.minX + blob.maxX) / 2, y: (blob.minY + blob.maxY) / 2 });
@@ -116,15 +210,44 @@ function plausiblePane(assignment: Record<Corner, Blob>, width: number, height: 
   const bl = centre(assignment.bl);
 
   // Convex, in order. Four markers around a pane always are, at any angle the
-  // pane can be photographed from - where four unrelated pieces of L-shaped ink
-  // are not. Ordering by position would say the same thing, but it is not
-  // available here: this has to hold for the reading the shapes gave when the
-  // positions were too close to call.
+  // pane can be photographed from, and it is their shapes that put them in this
+  // order - so this is also what catches a shape read wrong: a marker mistaken
+  // for the corner diagonally opposite swaps two of the four and the quad
+  // crosses itself.
   if (!isConvex([tl, tr, br, bl])) return false;
 
-  const spanX = Math.max(Math.abs(tr.x - tl.x), Math.abs(br.x - bl.x));
-  const spanY = Math.max(Math.abs(bl.y - tl.y), Math.abs(br.y - tr.y));
-  return spanX >= width * MIN_PANE_FRACTION && spanY >= height * MIN_PANE_FRACTION;
+  // Each one on the side of the middle its shape claims it is on. Convexity
+  // alone does not say this: it holds for the same four points read in the same
+  // order whatever angle they are seen from, so four pieces of text can be a
+  // convex quad whose "top right" sits at the bottom left. Requiring the two
+  // independent accounts - which way the L points, where it sits - to agree is
+  // what a real set of four always manages and scattered ink does not.
+  const middle = {
+    x: (tl.x + tr.x + br.x + bl.x) / 4,
+    y: (tl.y + tr.y + br.y + bl.y) / 4,
+  };
+  if (!(tl.x < middle.x && tl.y < middle.y)) return false;
+  if (!(tr.x > middle.x && tr.y < middle.y)) return false;
+  if (!(br.x > middle.x && br.y > middle.y)) return false;
+  if (!(bl.x < middle.x && bl.y > middle.y)) return false;
+
+  // How much of the frame the quad covers, which is the question this test is
+  // named for. Measuring each axis separately answers a different one and gets
+  // it wrong both ways: a sliver can be wide and tall while enclosing almost
+  // nothing, and a pane photographed in portrait is short against the frame's
+  // height however well it fills the shot.
+  return area([tl, tr, br, bl]) >= width * height * MIN_PANE_FRACTION;
+}
+
+/** Area of a quadrilateral, by the shoelace formula. */
+function area(quad: Point[]): number {
+  let sum = 0;
+  for (let i = 0; i < quad.length; i++) {
+    const a = quad[i];
+    const b = quad[(i + 1) % quad.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
 }
 
 /** Whether a quadrilateral turns the same way at every corner. */
@@ -144,7 +267,7 @@ function isConvex(quad: Point[]): boolean {
 }
 
 /** Every dark blob in the frame shaped like one of the markers. */
-function findMarkers(image: ImageData): Array<{ blob: Blob; corner: Corner; score: number }> {
+function findMarkers(image: ImageData): Array<{ blob: Blob; corner: Corner }> {
   const { width, height } = image;
 
   const gray = new Float32Array(width * height);
@@ -154,11 +277,11 @@ function findMarkers(image: ImageData): Array<{ blob: Blob; corner: Corner; scor
   const threshold = inkOnlyThreshold(gray);
 
   const maxSide = Math.min(width, height) * MAX_SIDE_FRACTION;
-  const found: Array<{ blob: Blob; corner: Corner; score: number }> = [];
+  const found: Array<{ blob: Blob; corner: Corner }> = [];
 
   for (const blob of connectedBlobs(gray, width, height, threshold, maxSide)) {
-    const shape = classify(blob);
-    if (shape) found.push({ blob, corner: shape.corner, score: shape.score });
+    const corner = classify(blob);
+    if (corner) found.push({ blob, corner });
   }
   return found;
 }
@@ -191,7 +314,7 @@ function inkOnlyThreshold(gray: Float32Array): number {
  * what separates a marker from a letter, a window border or a shadow, and it
  * reads the same at any distance: it is all ratios.
  */
-function classify(blob: Blob): { corner: Corner; score: number } | null {
+function classify(blob: Blob): Corner | null {
   const w = blob.maxX - blob.minX + 1;
   const h = blob.maxY - blob.minY + 1;
   if (w < MIN_SIDE_PX || h < MIN_SIDE_PX) return null;
@@ -211,75 +334,7 @@ function classify(blob: Blob): { corner: Corner; score: number } | null {
 
   // Quadrants in reading order are tl, tr, bl, br of the marker's own box.
   const emptyQuadrant = (["tl", "tr", "bl", "br"] as Corner[])[empty.indexOf(true)];
-  const corner = CORNER_BY_EMPTY_QUADRANT[emptyQuadrant];
-
-  // How cleanly it is an L: the emptier the empty quadrant and the closer the
-  // ink to an L's share, the better. Used only to choose between blobs that
-  // both claim the same corner.
-  const emptiness = 1 - quadrants[empty.indexOf(true)] / fullest;
-  const fillScore = 1 - Math.abs(fill - FILL_RATIO) / FILL_TOLERANCE;
-  return { corner, score: emptiness + fillScore };
-}
-
-/** The best-shaped candidate for each corner, when more than four look like markers. */
-function bestPerShape(
-  candidates: Array<{ blob: Blob; corner: Corner; score: number }>
-): Array<{ blob: Blob; corner: Corner; score: number }> | null {
-  const best = new Map<Corner, { blob: Blob; corner: Corner; score: number }>();
-  for (const candidate of candidates) {
-    const held = best.get(candidate.corner);
-    if (!held || candidate.score > held.score) best.set(candidate.corner, candidate);
-  }
-  return best.size === 4 ? [...best.values()] : null;
-}
-
-/** Groups candidates by the corner their shape names, keeping the best of each. */
-function assignByShape(
-  candidates: Array<{ blob: Blob; corner: Corner; score: number }>
-): Record<Corner, Blob> | null {
-  const best = new Map<Corner, { blob: Blob; score: number }>();
-  for (const candidate of candidates) {
-    const held = best.get(candidate.corner);
-    if (!held || candidate.score > held.score) {
-      best.set(candidate.corner, { blob: candidate.blob, score: candidate.score });
-    }
-  }
-  if (best.size !== 4) return null;
-
-  const assignment = {} as Record<Corner, Blob>;
-  for (const corner of CORNERS) assignment[corner] = best.get(corner)!.blob;
-  return assignment;
-}
-
-/**
- * Assigns four candidates to corners by where they sit relative to each other,
- * or gives up if that is too close to call.
- *
- * Two markers being level is not a near miss to be resolved by rounding: it is
- * the question of which pair is the top one having no answer in their positions
- * at all. Better to say so and let the shapes decide than to pick one.
- */
-function assignByPosition(
-  candidates: Array<{ blob: Blob; corner: Corner; score: number }>
-): Record<Corner, Blob> | null {
-  if (candidates.length !== 4) return null;
-
-  const centres = candidates.map(({ blob }) => ({
-    blob,
-    x: (blob.minX + blob.maxX) / 2,
-    y: (blob.minY + blob.maxY) / 2,
-    side: Math.max(blob.maxX - blob.minX, blob.maxY - blob.minY) + 1,
-  }));
-  const clear = Math.min(...centres.map((c) => c.side)) * SEPARATION;
-
-  const byY = [...centres].sort((a, b) => a.y - b.y);
-  if (byY[2].y - byY[1].y < clear) return null;
-
-  const [tl, tr] = byY.slice(0, 2).sort((a, b) => a.x - b.x);
-  const [bl, br] = byY.slice(2).sort((a, b) => a.x - b.x);
-  if (tr.x - tl.x < clear || br.x - bl.x < clear) return null;
-
-  return { tl: tl.blob, tr: tr.blob, br: br.blob, bl: bl.blob };
+  return CORNER_BY_EMPTY_QUADRANT[emptyQuadrant];
 }
 
 /**
