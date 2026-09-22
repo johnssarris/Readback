@@ -1,4 +1,4 @@
-import { luminance, otsuThreshold } from "./imageUtils";
+import { luminance, luminanceHistogram, otsuOfHistogram } from "./imageUtils";
 import { CORNERS, CORNER_BY_EMPTY_QUADRANT, FILL_RATIO, type Corner } from "./markerGeometry";
 import type { Point } from "./rectify";
 
@@ -29,6 +29,12 @@ const MAX_SIDE_FRACTION = 0.25;
 /** Share of each outer edge dropped at either end before the line is fitted. */
 const EDGE_TRIM = 0.1;
 
+/** Pixels past an edge, on the pane's side of it, that make a point the pane's ink rather than the arm's. */
+const INTRUSION_PX = 1;
+
+/** Times the edge along the pane is refitted with the pane's ink taken out. */
+const ENVELOPE_PASSES = 4;
+
 /** The four are drawn the same size; a tilted shot may still show them this much apart. */
 const SIZE_AGREEMENT = 1.6;
 
@@ -37,6 +43,15 @@ const MIN_PANE_FRACTION = 0.1;
 
 /** Candidates tried per corner, from the largest down, against each anchor. */
 const PER_CORNER_TRIES = 4;
+
+/** Thresholds tried, spread evenly from ink-only up to the whole frame's split. */
+const LADDER_LEVELS = 5;
+
+/** Two readings name the same pane when no corner moves more than this share of the frame's diagonal. */
+const AGREEMENT_FRACTION = 0.01;
+
+/** How far a marker's edge may turn from the pane side it lies along. */
+const ALIGNMENT_TOLERANCE = (10 * Math.PI) / 180;
 
 const NEIGHBOURS: Array<[number, number]> = [
   [1, 0],
@@ -90,7 +105,10 @@ export type MarkerOutcome =
 export interface MarkerReport {
   quad: MarkerQuad | null;
   outcome: MarkerOutcome;
-  /** Luminance at or below which a pixel was taken for ink. */
+  /**
+   * Luminance at or below which a pixel was taken for ink - at the level the
+   * pane was read at, or the first level tried when it was not.
+   */
   threshold: number;
   /** Dark blobs of a plausible size, before their shape was looked at. */
   blobs: number;
@@ -98,8 +116,22 @@ export interface MarkerReport {
   candidates: Record<Corner, number>;
   /** Sets of four put to the pane test. */
   quadsTried: number;
+  /** Every threshold tried, in the order it was tried, and where each one got to. */
+  levels: Array<{ threshold: number; outcome: MarkerOutcome }>;
+  /** How many of those levels named the pane that was chosen; zero when none was. */
+  agreeing: number;
   /** Wall-clock milliseconds, which is the number that decides whether this is usable on a phone. */
   ms: number;
+}
+
+/** One threshold's account of the frame. */
+interface Reading {
+  threshold: number;
+  quad: MarkerQuad | null;
+  outcome: MarkerOutcome;
+  blobs: number;
+  candidates: Record<Corner, number>;
+  tried: number;
 }
 
 /**
@@ -110,35 +142,142 @@ export function detectMarkerQuad(image: ImageData): MarkerQuad | null {
   return inspectMarkers(image).quad;
 }
 
-/** The same reading, with an account of how it got there. */
+/**
+ * The same reading, with an account of how it got there.
+ *
+ * No one threshold separates a photographed marker from its surroundings on
+ * every shot. The markers are drawn black, but a camera pointed at a monitor
+ * brings them back anywhere from near-black to a mid grey, depending on glare
+ * and moire - on the captures that prompted this, as light as the window
+ * chrome, so a threshold low enough to leave the chrome out left only a
+ * one-pixel sliver of each L in. Set it higher and it starts letting in the
+ * toolbar's icons, whose outlines are L's as good as any.
+ *
+ * So the frame is read at several thresholds, stopping once two of them name
+ * the same pane. A wrong quad is a coincidence - four pieces of ink that happen
+ * to pass at one threshold - and it does not recur at the next level, where the
+ * ink has grown or shrunk into other shapes. The real four do. When no two
+ * levels agree, the pane named by the most of them is taken, since every one
+ * has already passed every test a single reading can put it to.
+ */
 export function inspectMarkers(image: ImageData): MarkerReport {
   const started = Date.now();
-  const { candidates, blobs, threshold } = findMarkers(image);
+  const { width, height } = image;
+
+  const gray = new Float32Array(width * height);
+  for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
+    gray[i] = luminance(image.data[p], image.data[p + 1], image.data[p + 2]);
+  }
+
+  const tolerance = Math.hypot(width, height) * AGREEMENT_FRACTION;
+  const buffers = { seen: new Uint8Array(width * height), stack: [] as number[] };
+  const readings: Reading[] = [];
+  for (const threshold of thresholdLadder(gray)) {
+    const reading = readAt(gray, width, height, threshold, buffers);
+    readings.push(reading);
+    if (reading.quad && agreementWith(reading.quad, readings, tolerance) >= 2) break;
+  }
+
+  // The pane most levels agree on; on a tie, the one read nearest the middle
+  // of the ladder, which is where the ladder starts.
+  let chosen: Reading | null = null;
+  let agreeing = 0;
+  for (const reading of readings) {
+    if (!reading.quad) continue;
+    const votes = agreementWith(reading.quad, readings, tolerance);
+    if (votes > agreeing) {
+      chosen = reading;
+      agreeing = votes;
+    }
+  }
+
+  const shown = chosen ?? readings[0];
+  return {
+    quad: chosen?.quad ?? null,
+    outcome: shown.outcome,
+    threshold: shown.threshold,
+    blobs: shown.blobs,
+    candidates: shown.candidates,
+    quadsTried: shown.tried,
+    levels: readings.map((r) => ({ threshold: r.threshold, outcome: r.outcome })),
+    agreeing,
+    ms: Date.now() - started,
+  };
+}
+
+/** How many of the readings name this pane, counting the one it came from. */
+function agreementWith(quad: MarkerQuad, readings: Reading[], tolerance: number): number {
+  let votes = 0;
+  for (const other of readings) {
+    if (!other.quad) continue;
+    const same = quad.corners.every(
+      (corner, i) => Math.hypot(corner.x - other.quad!.corners[i].x, corner.y - other.quad!.corners[i].y) <= tolerance
+    );
+    if (same) votes++;
+  }
+  return votes;
+}
+
+/**
+ * The thresholds to try, in the order to try them.
+ *
+ * They run from the ink-only split - the darkest a marker is ever read at -
+ * up to the split of the whole frame into dark and light, past which the white
+ * around the markers starts to go too. Middle first, then outward: the middle
+ * of that range is where a photographed marker most often is.
+ */
+function thresholdLadder(gray: Float32Array): number[] {
+  const histogram = luminanceHistogram(gray);
+  const whole = otsuOfHistogram(histogram);
+  const inkOnly = inkOnlyThreshold(histogram, whole);
+
+  const levels: number[] = [];
+  for (let i = 0; i < LADDER_LEVELS; i++) {
+    const level = Math.round(inkOnly + ((whole - inkOnly) * i) / (LADDER_LEVELS - 1));
+    if (!levels.includes(level)) levels.push(level);
+  }
+
+  const middle = (levels.length - 1) >> 1;
+  const order: number[] = [levels[middle]];
+  for (let step = 1; order.length < levels.length; step++) {
+    if (middle + step < levels.length) order.push(levels[middle + step]);
+    if (middle - step >= 0) order.push(levels[middle - step]);
+  }
+  return order;
+}
+
+/** The frame read at one threshold: its candidates, and the pane they make if they make one. */
+function readAt(
+  gray: Float32Array,
+  width: number,
+  height: number,
+  threshold: number,
+  buffers: { seen: Uint8Array; stack: number[] }
+): Reading {
+  const maxSide = Math.min(width, height) * MAX_SIDE_FRACTION;
+  const blobs = connectedBlobs(gray, width, height, threshold, maxSide, buffers);
+
+  const candidates: Array<{ blob: Blob; corner: Corner }> = [];
+  for (const blob of blobs) {
+    const corner = classify(blob);
+    if (corner) candidates.push({ blob, corner });
+  }
 
   const counts = { tl: 0, tr: 0, br: 0, bl: 0 } as Record<Corner, number>;
   for (const candidate of candidates) counts[candidate.corner]++;
 
-  const search = chooseQuad(candidates, image.width, image.height);
-  const quad = search.assignment
-    ? {
-        corners: CORNERS.map((corner) => fitCorner(search.assignment![corner], corner)) as [
-          Point,
-          Point,
-          Point,
-          Point,
-        ],
-        found: 4,
-      }
+  const search = chooseQuad(candidates, width, height);
+  const quad = search.fits
+    ? { corners: CORNERS.map((corner) => search.fits![corner].corner) as [Point, Point, Point, Point], found: 4 }
     : null;
 
   return {
+    threshold,
     quad,
     outcome: outcomeOf(quad, candidates.length, counts),
-    threshold,
-    blobs,
+    blobs: blobs.length,
     candidates: counts,
-    quadsTried: search.tried,
-    ms: Date.now() - started,
+    tried: search.tried,
   };
 }
 
@@ -172,9 +311,9 @@ function chooseQuad(
   candidates: Array<{ blob: Blob; corner: Corner }>,
   width: number,
   height: number
-): { assignment: Record<Corner, Blob> | null; tried: number } {
+): { fits: Record<Corner, Fit> | null; tried: number } {
   let tried = 0;
-  if (candidates.length < 4) return { assignment: null, tried };
+  if (candidates.length < 4) return { fits: null, tried };
 
   // Each corner's candidates, largest first, sorted once: every size window
   // below is then a slice of one of these rather than a pass over all of them.
@@ -184,12 +323,24 @@ function chooseQuad(
     byCorner[candidate.corner].push({ blob: candidate.blob, side: sideOf(candidate.blob) });
   }
   for (const corner of CORNERS) {
-    if (byCorner[corner].length === 0) return { assignment: null, tried };
+    if (byCorner[corner].length === 0) return { fits: null, tried };
     byCorner[corner].sort((a, b) => b.side - a.side);
   }
 
   const anchors = CORNERS.flatMap((corner) => byCorner[corner].map((c) => ({ ...c, corner })));
   anchors.sort((a, b) => b.side - a.side);
+
+  // A blob is fitted once however many quads it is tried in, and only once it
+  // has been part of one that passed everything cheaper.
+  const fitted = new Map<Blob, Fit>();
+  const fitOf = (blob: Blob, corner: Corner) => {
+    let fit = fitted.get(blob);
+    if (!fit) {
+      fit = fitCorner(blob, corner);
+      fitted.set(blob, fit);
+    }
+    return fit;
+  };
 
   for (const anchor of anchors) {
     // Nothing larger than the anchor, since the anchor is the quad's largest
@@ -203,10 +354,73 @@ function chooseQuad(
     for (const [tl, tr, br, bl] of combinations(choices)) {
       tried++;
       const assignment = { tl: tl.blob, tr: tr.blob, br: br.blob, bl: bl.blob };
-      if (plausiblePane(assignment, width, height)) return { assignment, tried };
+      if (!plausiblePane(assignment, width, height)) continue;
+
+      const fits = {
+        tl: fitOf(tl.blob, "tl"),
+        tr: fitOf(tr.blob, "tr"),
+        br: fitOf(br.blob, "br"),
+        bl: fitOf(bl.blob, "bl"),
+      };
+      if (alongThePane(fits)) return { fits, tried };
     }
   }
-  return { assignment: null, tried };
+  return { fits: null, tried };
+}
+
+/**
+ * Pane sides, as the pair of corners at either end, that each marker's two
+ * outer edges lie along: its horizontal edge first, then its vertical one.
+ */
+const SIDES_OF: Record<Corner, [[Corner, Corner], [Corner, Corner]]> = {
+  tl: [
+    ["tl", "tr"],
+    ["tl", "bl"],
+  ],
+  tr: [
+    ["tl", "tr"],
+    ["tr", "br"],
+  ],
+  br: [
+    ["bl", "br"],
+    ["tr", "br"],
+  ],
+  bl: [
+    ["bl", "br"],
+    ["tl", "bl"],
+  ],
+};
+
+/**
+ * Whether each marker's arms run along the sides of the pane the four make.
+ *
+ * The overlay draws every L with its outer edges flush with the pane's edges,
+ * so they lie on the pane's sides - at any angle the screen is photographed
+ * from, since a straight line stays straight in a photograph. Four blobs that
+ * are not the markers can pass every other test here, each L-shaped and the
+ * four of them a sensible quad, but their edges point wherever that ink
+ * happened to point: on the captures that prompted this, a toolbar icon read
+ * as the top-left marker had its left edge forty degrees off the pane's.
+ */
+function alongThePane(fits: Record<Corner, Fit>): boolean {
+  for (const corner of CORNERS) {
+    const edges = [fits[corner].horizontal, fits[corner].vertical];
+    for (let k = 0; k < 2; k++) {
+      const edge = edges[k];
+      if (!edge) return false;
+
+      const [from, to] = SIDES_OF[corner][k];
+      const a = fits[from].corner;
+      const b = fits[to].corner;
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (length === 0) return false;
+
+      // Lines, not directions: which way along the side the fit points is arbitrary.
+      const cosine = Math.abs(edge.dx * (b.x - a.x) + edge.dy * (b.y - a.y)) / length;
+      if (cosine < Math.cos(ALIGNMENT_TOLERANCE)) return false;
+    }
+  }
+  return true;
 }
 
 interface Sized {
@@ -336,31 +550,6 @@ function isConvex(quad: Point[]): boolean {
   return sign !== 0;
 }
 
-/** Every dark blob in the frame shaped like one of the markers. */
-function findMarkers(image: ImageData): {
-  candidates: Array<{ blob: Blob; corner: Corner }>;
-  blobs: number;
-  threshold: number;
-} {
-  const { width, height } = image;
-
-  const gray = new Float32Array(width * height);
-  for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
-    gray[i] = luminance(image.data[p], image.data[p + 1], image.data[p + 2]);
-  }
-  const threshold = inkOnlyThreshold(gray);
-
-  const maxSide = Math.min(width, height) * MAX_SIDE_FRACTION;
-  const blobs = connectedBlobs(gray, width, height, threshold, maxSide);
-  const candidates: Array<{ blob: Blob; corner: Corner }> = [];
-
-  for (const blob of blobs) {
-    const corner = classify(blob);
-    if (corner) candidates.push({ blob, corner });
-  }
-  return { candidates, blobs: blobs.length, threshold };
-}
-
 /**
  * A threshold that separates ink from everything else, rather than dark from light.
  *
@@ -372,13 +561,13 @@ function findMarkers(image: ImageData): {
  * left to find.
  *
  * Splitting the dark side again separates the markers' black from the chrome's
- * grey, and leaves the blur between them out of both. What survives is ink.
+ * grey, and leaves the blur between them out of both. What survives is ink -
+ * when the markers photograph black. When glare lifts them to the chrome's
+ * grey, it is the bottom of the ladder rather than the one threshold used.
  */
-function inkOnlyThreshold(gray: Float32Array): number {
-  const all = Array.from(gray);
-  const first = otsuThreshold(all);
-  const dark = all.filter((v) => v <= first);
-  return dark.length > 0 ? otsuThreshold(dark) : first;
+function inkOnlyThreshold(histogram: number[], whole: number): number {
+  const dark = histogram.map((count, level) => (level <= whole ? count : 0));
+  return dark.some((count) => count > 0) ? otsuOfHistogram(dark) : whole;
 }
 
 /**
@@ -419,7 +608,7 @@ function classify(blob: Blob): Corner | null {
  * survives a ragged pixel or two at the tip of an arm - which a bounding box,
  * decided entirely by its extremes, does not.
  */
-function fitCorner(blob: Blob, corner: Corner): Point {
+function fitCorner(blob: Blob, corner: Corner): Fit {
   const alongTop = corner === "bl" || corner === "br";
   const alongLeft = corner === "tl" || corner === "bl";
 
@@ -430,14 +619,24 @@ function fitCorner(blob: Blob, corner: Corner): Point {
     if (y >= 0) horizontal.push({ x: blob.minX + i, y });
   }
 
+  // The pane is below a top marker and above a bottom one. Its own ink - the
+  // last line of text, cut off by the pane's bottom edge, is the usual one -
+  // can blur into the arm lying along that edge, and is always on that side.
+  const paneSide = alongTop ? -1 : 1;
+  const a = fitAlongPane(trim(horizontal), paneSide);
+
+  // The other arm runs away from the pane, so a row on the pane's side of the
+  // first edge is not part of it, whatever ink the blob took in there.
   const vertical: Point[] = [];
   const height = blob.maxY - blob.minY + 1;
   for (let i = 0; i < height; i++) {
     const x = alongLeft ? blob.leftOf[i] : blob.rightOf[i];
-    if (x >= 0) vertical.push({ x, y: blob.minY + i });
+    if (x < 0) continue;
+    const point = { x, y: blob.minY + i };
+    if (a && beyond(a, point) * paneSide > INTRUSION_PX) continue;
+    vertical.push(point);
   }
 
-  const a = fitLine(trim(horizontal));
   const b = fitLine(trim(vertical));
   const crossing = a && b ? intersect(a, b) : null;
 
@@ -451,9 +650,56 @@ function fitCorner(blob: Blob, corner: Corner): Point {
   // marker faces: a whole pixel of bias at every corner otherwise, always in
   // the same direction, which is exactly the kind that survives averaging.
   return {
-    x: found.x + (alongLeft ? 0 : 1),
-    y: found.y + (alongTop ? 0 : 1),
+    corner: {
+      x: found.x + (alongLeft ? 0 : 1),
+      y: found.y + (alongTop ? 0 : 1),
+    },
+    horizontal: a,
+    vertical: b,
   };
+}
+
+/** Where a marker puts its pane corner, and the two outer edges that say so. */
+interface Fit {
+  corner: Point;
+  horizontal: Line | null;
+  vertical: Line | null;
+}
+
+/**
+ * The edge of the arm that lies along the pane, fitted to the arm alone.
+ *
+ * The overlay puts that edge flush with the pane's, so whatever the pane shows
+ * there is a pixel away - on real captures, the tops of the glyphs on the
+ * half-visible last line, which blur into the bottom markers' arms. The blob
+ * then runs on into them, and its outermost ink along some stretch of the edge
+ * is theirs. Fitted with the rest, they tilted the bottom-left marker's edge by
+ * up to twenty degrees and moved its corner seven pixels.
+ *
+ * They can be told apart by where they are: always past the arm's edge on the
+ * pane's side, never on the other. So the edge is fitted, whatever sticks out
+ * past it on the pane's side is taken to be the pane's, and it is fitted again
+ * without it, until nothing more comes out. Counting points would not do - on
+ * one capture the glyphs cover more of the edge than the arm does.
+ */
+function fitAlongPane(points: Point[], paneSide: number): Line | null {
+  let kept = points;
+  let line = fitLine(kept);
+  for (let pass = 0; pass < ENVELOPE_PASSES && line; pass++) {
+    const fitted = line;
+    const arm = kept.filter((p) => beyond(fitted, p) * paneSide <= INTRUSION_PX);
+    if (arm.length === kept.length || arm.length < 2) break;
+    kept = arm;
+    line = fitLine(kept);
+  }
+  return line;
+}
+
+/** How far below a near-horizontal line a point is, in pixels; negative above it. */
+function beyond(line: Line, p: Point): number {
+  // The normal that points down the image, whichever way the fit ran.
+  const flip = line.dx < 0 ? -1 : 1;
+  return flip * ((p.y - line.point.y) * line.dx - (p.x - line.point.x) * line.dy);
 }
 
 /** Drops the ends of an edge, where the two arms meet and where the ink runs out. */
@@ -518,11 +764,15 @@ function connectedBlobs(
   width: number,
   height: number,
   threshold: number,
-  maxSide: number
+  maxSide: number,
+  buffers: { seen: Uint8Array; stack: number[] }
 ): Blob[] {
-  const seen = new Uint8Array(width * height);
+  // Allocated once per frame and cleared here: the frame is read at several
+  // thresholds, and a phone would rather not collect megabytes for each one.
+  const { seen, stack } = buffers;
+  seen.fill(0);
+  stack.length = 0;
   const blobs: Blob[] = [];
-  const stack: number[] = [];
 
   for (let start = 0; start < gray.length; start++) {
     if (seen[start] || gray[start] > threshold) continue;
