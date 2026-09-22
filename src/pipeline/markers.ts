@@ -68,16 +68,84 @@ interface Blob {
   rightOf: Int32Array;
 }
 
+/** Where a reading stopped, when it did not reach a quad. */
+export type MarkerOutcome =
+  /** Four markers, and the pane they name. */
+  | "found"
+  /** Nothing in the frame was shaped like a marker. */
+  | "no-candidates"
+  /** Marker-shaped ink, but not one facing each of the four ways. */
+  | "corners-missing"
+  /** One of each, and no four of them together looked like a pane. */
+  | "no-plausible-quad";
+
+/**
+ * What the detector saw, as well as what it concluded.
+ *
+ * A detector that answers only yes or no is one that can only be debugged by
+ * whoever has both the failing photograph and the source - which, for a thing
+ * that runs on a phone against a screen in someone else's office, is nobody.
+ * Every stage that can discard a marker reports how much it discarded.
+ */
+export interface MarkerReport {
+  quad: MarkerQuad | null;
+  outcome: MarkerOutcome;
+  /** Luminance at or below which a pixel was taken for ink. */
+  threshold: number;
+  /** Dark blobs of a plausible size, before their shape was looked at. */
+  blobs: number;
+  /** Of those, the ones shaped like a marker, counted by the corner each names. */
+  candidates: Record<Corner, number>;
+  /** Sets of four put to the pane test. */
+  quadsTried: number;
+  /** Wall-clock milliseconds, which is the number that decides whether this is usable on a phone. */
+  ms: number;
+}
+
 /**
  * Locates the pane by its corner markers, or returns null if fewer than four
  * are there to be found.
  */
 export function detectMarkerQuad(image: ImageData): MarkerQuad | null {
-  const assignment = chooseQuad(findMarkers(image), image.width, image.height);
-  if (!assignment) return null;
+  return inspectMarkers(image).quad;
+}
 
-  const corners = CORNERS.map((corner) => fitCorner(assignment[corner], corner));
-  return { corners: corners as [Point, Point, Point, Point], found: 4 };
+/** The same reading, with an account of how it got there. */
+export function inspectMarkers(image: ImageData): MarkerReport {
+  const started = Date.now();
+  const { candidates, blobs, threshold } = findMarkers(image);
+
+  const counts = { tl: 0, tr: 0, br: 0, bl: 0 } as Record<Corner, number>;
+  for (const candidate of candidates) counts[candidate.corner]++;
+
+  const search = chooseQuad(candidates, image.width, image.height);
+  const quad = search.assignment
+    ? {
+        corners: CORNERS.map((corner) => fitCorner(search.assignment![corner], corner)) as [
+          Point,
+          Point,
+          Point,
+          Point,
+        ],
+        found: 4,
+      }
+    : null;
+
+  return {
+    quad,
+    outcome: outcomeOf(quad, candidates.length, counts),
+    threshold,
+    blobs,
+    candidates: counts,
+    quadsTried: search.tried,
+    ms: Date.now() - started,
+  };
+}
+
+function outcomeOf(quad: MarkerQuad | null, candidates: number, counts: Record<Corner, number>): MarkerOutcome {
+  if (quad) return "found";
+  if (candidates === 0) return "no-candidates";
+  return CORNERS.some((corner) => counts[corner] === 0) ? "corners-missing" : "no-plausible-quad";
 }
 
 /**
@@ -104,8 +172,9 @@ function chooseQuad(
   candidates: Array<{ blob: Blob; corner: Corner }>,
   width: number,
   height: number
-): Record<Corner, Blob> | null {
-  if (candidates.length < 4) return null;
+): { assignment: Record<Corner, Blob> | null; tried: number } {
+  let tried = 0;
+  if (candidates.length < 4) return { assignment: null, tried };
 
   // Each corner's candidates, largest first, sorted once: every size window
   // below is then a slice of one of these rather than a pass over all of them.
@@ -115,7 +184,7 @@ function chooseQuad(
     byCorner[candidate.corner].push({ blob: candidate.blob, side: sideOf(candidate.blob) });
   }
   for (const corner of CORNERS) {
-    if (byCorner[corner].length === 0) return null;
+    if (byCorner[corner].length === 0) return { assignment: null, tried };
     byCorner[corner].sort((a, b) => b.side - a.side);
   }
 
@@ -132,11 +201,12 @@ function chooseQuad(
     if (choices.some((list) => list.length === 0)) continue;
 
     for (const [tl, tr, br, bl] of combinations(choices)) {
+      tried++;
       const assignment = { tl: tl.blob, tr: tr.blob, br: br.blob, bl: bl.blob };
-      if (plausiblePane(assignment, width, height)) return assignment;
+      if (plausiblePane(assignment, width, height)) return { assignment, tried };
     }
   }
-  return null;
+  return { assignment: null, tried };
 }
 
 interface Sized {
@@ -267,7 +337,11 @@ function isConvex(quad: Point[]): boolean {
 }
 
 /** Every dark blob in the frame shaped like one of the markers. */
-function findMarkers(image: ImageData): Array<{ blob: Blob; corner: Corner }> {
+function findMarkers(image: ImageData): {
+  candidates: Array<{ blob: Blob; corner: Corner }>;
+  blobs: number;
+  threshold: number;
+} {
   const { width, height } = image;
 
   const gray = new Float32Array(width * height);
@@ -277,13 +351,14 @@ function findMarkers(image: ImageData): Array<{ blob: Blob; corner: Corner }> {
   const threshold = inkOnlyThreshold(gray);
 
   const maxSide = Math.min(width, height) * MAX_SIDE_FRACTION;
-  const found: Array<{ blob: Blob; corner: Corner }> = [];
+  const blobs = connectedBlobs(gray, width, height, threshold, maxSide);
+  const candidates: Array<{ blob: Blob; corner: Corner }> = [];
 
-  for (const blob of connectedBlobs(gray, width, height, threshold, maxSide)) {
+  for (const blob of blobs) {
     const corner = classify(blob);
-    if (corner) found.push({ blob, corner });
+    if (corner) candidates.push({ blob, corner });
   }
-  return found;
+  return { candidates, blobs: blobs.length, threshold };
 }
 
 /**

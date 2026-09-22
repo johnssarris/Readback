@@ -23,6 +23,13 @@ export interface FixtureMeta {
    * with no markers is its own frame.
    */
   corners?: [Point, Point, Point, Point];
+  /**
+   * What the app recorded about the capture, when the fixture came out of its
+   * save button: the frame size, what the camera track was doing, and the
+   * detector's own account of the frame. Nothing here reads it - it is for
+   * whoever is looking into why this particular capture went wrong.
+   */
+  diagnostics?: unknown;
   /** Known geometry, when the fixture was generated rather than captured. */
   truth?: {
     cellWidthPx: number;
