@@ -56,15 +56,6 @@ const MIN_ROW_INK = 2;
  */
 const MAX_ROW_INK_FRACTION = 0.6;
 
-/** Most phase bins used to count the rows within one line's spacing. */
-const ROW_PHASE_BINS = 32;
-
-/** A wrapped line is taken to occupy at most this many rows. */
-const MAX_ROWS_PER_LINE = 4;
-
-/** Share of the busiest phase's ink that still counts as part of a row. */
-const BAND_THRESHOLD = 0.15;
-
 /** Share of a typical row's ink that separates a row with only a line number on it from noise. */
 const MIN_ROW_INK_SHARE = 0.02;
 
@@ -192,23 +183,30 @@ function detectRows(image: ImageData, margins: MarginBounds, gutter: GutterAnaly
 }
 
 /**
- * The row pitch, from the line numbers' spacing and how many rows fit in it.
+ * The row pitch, which is the spacing between line numbers.
  *
- * Line numbers are a line apart, which is a whole number of rows: one for a line
- * that fits, more for one the editor wrapped. Folding the body's ink onto its
- * phase within that spacing shows how many rows there are - one band of ink per
- * row - and the pitch is the spacing divided by however many come back.
+ * A line number sits beside the first row of its line, so the step from one to
+ * the next is one row for a line that fits and more for one the editor wrapped.
+ * Taken as a median across the screenful that is the row pitch outright,
+ * because wrapping is the exception: it takes more than half the visible lines
+ * wrapping for the median step to be anything but a single row, and a screenful
+ * like that is one where the window wants making wider.
  *
- * Counting bands rather than scoring candidate pitches matters: a pitch of half
- * a row divides the true one exactly, so it folds just as neatly and scores just
- * as well. Only the number of bands tells them apart.
+ * This used to be divided by a count of rows per line, folded out of the body's
+ * ink and counted as bands. The count had nothing to add - the median already
+ * answers the same question from a signal that does not depend on how a
+ * photograph came out - and it had something to lose: whether the dip inside a
+ * row, between the tops of the capitals and the x-height band, cuts deeper than
+ * the blank between lines is a property of the lens and not of the editor. Two
+ * photographs of the same window a step apart disagreed about it, and the one
+ * it split read every line twice at half the pitch. Removing it left every
+ * fixture's row count right, the wrapped one included.
  *
- * Taking the pitch from the ink alone would be worse again: at small font sizes
- * a photograph blurs one row's descenders into the next row's ascenders, and
- * rows that touch cannot be counted at all.
+ * What is given up is a screenful where nearly every line wraps, which no
+ * fixture covers. The band count did not reliably rescue that case either.
  */
 function rowPitch(profile: number[], lineSpacing: number): number {
-  const coarse = lineSpacing / rowsPerLine(profile, lineSpacing);
+  const coarse = lineSpacing;
 
   // Polish: the line numbers' spacing is a median of whole-pixel measurements,
   // and a fraction of a pixel per row is a whole row by the bottom of a screenful.
@@ -227,42 +225,6 @@ function rowPitch(profile: number[], lineSpacing: number): number {
 }
 
 /** How many bands of ink fall within one line's spacing: one per displayed row. */
-function rowsPerLine(profile: number[], lineSpacing: number): number {
-  // Never more bins than the spacing has pixels: with bins finer than the
-  // samples, empty ones fall between the full ones and every phase reads as a
-  // band of its own.
-  const binCount = Math.max(2, Math.min(ROW_PHASE_BINS, Math.floor(lineSpacing)));
-
-  const bins = new Array(binCount).fill(0);
-  let total = 0;
-  for (let i = 0; i < profile.length; i++) {
-    const phase = i % lineSpacing;
-    bins[Math.min(binCount - 1, Math.floor((phase / lineSpacing) * binCount))] += profile[i];
-    total += profile[i];
-  }
-  if (total === 0) return 1;
-
-  // Counted well below the peak, because a row is not one smooth hump: ink
-  // thins out between the tops of the capitals and the x-height band, and a
-  // threshold near the average splits a single row in two there. The gap
-  // between one row and the next has next to no ink in it at all, which is what
-  // separates rows from the dips inside them.
-  //
-  // Counted around the cycle from the emptiest phase, so a band straddling the
-  // wrap-around isn't counted twice.
-  const threshold = Math.max(...bins) * BAND_THRESHOLD;
-  const start = bins.indexOf(Math.min(...bins));
-  let bands = 0;
-  let inBand = false;
-  for (let i = 0; i < binCount; i++) {
-    const above = bins[(start + i) % binCount] > threshold;
-    if (above && !inBand) bands++;
-    inBand = above;
-  }
-
-  return Math.min(MAX_ROWS_PER_LINE, Math.max(1, bands));
-}
-
 interface RowGrid {
   pitch: number;
   centers: number[];
