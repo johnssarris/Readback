@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectMarkerQuad } from "./markers";
+import { detectMarkerQuad, inspectMarkers } from "./markers";
 import { ARM, MARGIN, THICK, type Corner } from "./markerGeometry";
 import { applyHomography, computeHomography, warpImageData, type Point } from "./rectify";
 
@@ -215,15 +215,37 @@ describe("detectMarkerQuad", () => {
     expect(br.y).toBeCloseTo(pane.bottom, 0);
   });
 
+  it("says which stage the markers were lost at", () => {
+    const found = inspectMarkers(buildScene().image);
+    expect(found.outcome).toBe("found");
+    expect(found.candidates).toEqual({ tl: 1, tr: 1, br: 1, bl: 1 });
+    expect(found.blobs).toBeGreaterThanOrEqual(4);
+
+    // One marker gone: three corners are still named, and the report says the
+    // fourth was never there rather than that the four did not fit together.
+    const missing = inspectMarkers(buildScene({ omit: "br" }).image);
+    expect(missing.outcome).toBe("corners-missing");
+    expect(missing.candidates.br).toBe(0);
+    expect(missing.quad).toBeNull();
+
+    // A blank window has no marker-shaped ink at all.
+    expect(inspectMarkers(blankWindow()).outcome).toBe("no-candidates");
+  });
+
   it("finds nothing in a window with no markers on it", () => {
-    const data = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-    for (let i = 0; i < WIDTH * HEIGHT; i++) {
-      const gray = i % WIDTH > 60 && i % WIDTH < WIDTH - 60 ? PAGE : CHROME;
-      data[i * 4] = gray;
-      data[i * 4 + 1] = gray;
-      data[i * 4 + 2] = gray;
-      data[i * 4 + 3] = 255;
-    }
-    expect(detectMarkerQuad({ width: WIDTH, height: HEIGHT, data, colorSpace: "srgb" } as ImageData)).toBeNull();
+    expect(detectMarkerQuad(blankWindow())).toBeNull();
   });
 });
+
+/** A window with a page and chrome and nothing drawn on it. */
+function blankWindow(): ImageData {
+  const data = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+  for (let i = 0; i < WIDTH * HEIGHT; i++) {
+    const gray = i % WIDTH > 60 && i % WIDTH < WIDTH - 60 ? PAGE : CHROME;
+    data[i * 4] = gray;
+    data[i * 4 + 1] = gray;
+    data[i * 4 + 2] = gray;
+    data[i * 4 + 3] = 255;
+  }
+  return { width: WIDTH, height: HEIGHT, data, colorSpace: "srgb" } as ImageData;
+}

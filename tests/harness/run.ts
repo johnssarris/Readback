@@ -12,7 +12,7 @@ import {
   warpImageData,
   type Point,
 } from "../../src/pipeline/rectify";
-import { detectMarkerQuad } from "../../src/pipeline/markers";
+import { inspectMarkers, type MarkerReport } from "../../src/pipeline/markers";
 import { buildRows, rowsToText } from "../../src/model/lineIndex";
 import { photograph, type CameraOptions } from "./degrade";
 import type { Fixture } from "./cases";
@@ -71,7 +71,8 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   // Corner markers first, since they name the pane itself rather than the
   // window around it. The sidecar's own corners are next, and a flat capture
   // with neither is its own frame.
-  const markers = detectMarkerQuad(image);
+  const report = inspectMarkers(image);
+  const markers = report.quad;
   if (markers) {
     corners = markers.corners;
   } else if (fixture.meta.corners) {
@@ -80,8 +81,9 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     // A photo with neither is not a broken fixture, it is the detector failing
     // on it, and that is a result to report rather than an error to throw:
     // nothing in the image says where the window is, so there is nothing left
-    // to measure, and the table should say so on the row.
-    return unread(fixture, image);
+    // to measure, and the table should say so on the row - including which
+    // stage of the detector the markers were lost at.
+    return unread(fixture, image, report);
   } else if (mode === "camera") {
     corners = photograph(source, camera).corners;
   } else {
@@ -147,7 +149,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
  * The result for a fixture the pipeline could not start on, so the table has a
  * row for it saying why rather than the run stopping at the first one.
  */
-function unread(fixture: Fixture, image: ImageData): RunResult {
+function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunResult {
   return {
     margins: { bodyTopY: 0, bodyBottomY: 0, gutterRightEdgeX: 0, textAreaLeftX: 0, textAreaRightX: 0, gutterLeftX: 0 },
     pitch: { widthPx: NaN, heightPx: NaN, columnOriginX: NaN, rowYCenters: [], rowBaselines: [] },
@@ -169,9 +171,14 @@ function unread(fixture: Fixture, image: ImageData): RunResult {
     text: null,
     rectified: image,
     scale: { x: 1, y: 1 },
-    unreadable: "no corner markers found",
+    unreadable:
+      `${report.outcome} (ink<=${report.threshold}, ${report.blobs} blobs, ` +
+      `${CORNER_ORDER.map((c) => `${c}:${report.candidates[c]}`).join(" ")}, ` +
+      `${report.quadsTried} quads, ${report.ms}ms)`,
   };
 }
+
+const CORNER_ORDER = ["tl", "tr", "br", "bl"] as const;
 
 function score(
   fixture: Fixture,
