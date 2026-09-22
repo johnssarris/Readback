@@ -92,6 +92,32 @@ that need it are skipped for fixtures that don't have it; everything measurable
 from the text alone — row count, ink accuracy, indentation, CER — is reported
 either way.
 
+## Marker-only captures: `markers/`
+
+Photos kept for the corner-marker detector alone, not the whole pipeline. The
+harness above reads only this directory's top level, so they never enter the
+metrics table, and they need no ground-truth text. Instead each carries the
+four pane corners, found by eye on a zoomed crop of each marker:
+
+```json
+{
+  "note": "what the shot is, and what the detector made of it before",
+  "corners": [[73.4, 196.9], [993.9, 215], [960.4, 722], [95.6, 718]]
+}
+```
+
+`tests/markers.photos.test.ts` requires every one of them, and the three
+`photo-*` fixtures above, to be found with every corner within 3 px.
+
+A capture saved from the app goes in cropped to the monitor, so nothing on
+the desk around it is committed. Crop losslessly, with offsets on 16 px
+boundaries so no block is re-encoded, and subtract the offset from the
+corners:
+
+```sh
+jpegtran -copy none -crop 1080x944+0+400 -outfile markers/capture-121834.jpg readback-20260922-121834.jpg
+```
+
 ## Flat and camera
 
 Every non-photo fixture is measured twice. **flat** feeds the image in as it is,

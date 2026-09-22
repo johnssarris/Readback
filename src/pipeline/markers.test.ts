@@ -25,6 +25,15 @@ interface SceneOptions {
   eroded?: boolean;
   /** Crisp L-shaped ink inside the pane, one naming each corner, at this arm length. */
   decoyArm?: number;
+  /**
+   * The markers' ink and the chrome's grey, where they are not the defaults.
+   * A camera pointed at a monitor can bring the markers' black back as light
+   * as the chrome around them, or lighter.
+   */
+  ink?: number;
+  chrome?: number;
+  /** One marker drawn this far to the right of its corner, and so off the pane's side. */
+  displaced?: { corner: Corner; dx: number };
 }
 
 /**
@@ -62,11 +71,12 @@ function buildScene(options: SceneOptions = {}): Scene {
     const boxY = top ? cornerY - a : cornerY;
     const armY = top ? boxY + a - t : boxY;
     const armX = left ? boxX : boxX + a - t;
-    fill(boxX, armY, boxX + a, armY + t, INK);
-    fill(armX, boxY, armX + t, boxY + a, INK);
+    fill(boxX, armY, boxX + a, armY + t, ink);
+    fill(armX, boxY, armX + t, boxY + a, ink);
   };
 
-  fill(0, 0, WIDTH, HEIGHT, CHROME);
+  const ink = options.ink ?? INK;
+  fill(0, 0, WIDTH, HEIGHT, options.chrome ?? CHROME);
   fill(pane.left, pane.top, pane.right, pane.bottom, PAGE);
 
   const m = MARGIN;
@@ -77,10 +87,11 @@ function buildScene(options: SceneOptions = {}): Scene {
 
     const top = corner[0] === "t";
     const left = corner[1] === "l";
-    const cornerX = left ? pane.left : pane.right;
+    const shift = options.displaced?.corner === corner ? options.displaced.dx : 0;
+    const cornerX = (left ? pane.left : pane.right) + shift;
     const cornerY = top ? pane.top : pane.bottom;
 
-    const originX = left ? pane.left - m : pane.right - ARM - m;
+    const originX = (left ? pane.left - m : pane.right - ARM - m) + shift;
     const originY = top ? pane.top - ARM - m : pane.bottom;
     fill(originX, originY, originX + ARM + 2 * m, originY + ARM + m, 255);
 
@@ -213,6 +224,33 @@ describe("detectMarkerQuad", () => {
     expect(tl.y).toBeCloseTo(pane.top, 0);
     expect(br.x).toBeCloseTo(pane.right, 0);
     expect(br.y).toBeCloseTo(pane.bottom, 0);
+  });
+
+  it("finds markers photographed as light as the chrome around them", () => {
+    // What glare did to the captures that prompted the threshold ladder: the
+    // markers' black came back a mid grey, lighter than the window chrome, and
+    // a threshold chosen to leave the chrome out left the markers out with it.
+    const { image, pane } = buildScene({ ink: 90, chrome: 40 });
+    const quad = detectMarkerQuad(image);
+
+    expect(quad).not.toBeNull();
+    const [tl, , br] = quad!.corners;
+    expect(tl.x).toBeCloseTo(pane.left, 0);
+    expect(tl.y).toBeCloseTo(pane.top, 0);
+    expect(br.x).toBeCloseTo(pane.right, 0);
+    expect(br.y).toBeCloseTo(pane.bottom, 0);
+  });
+
+  it("rejects four markers whose arms do not run along the pane they make", () => {
+    // A top-left L a hundred pixels along the top: the right size, the right
+    // way round, in the right quarter of a convex quad big enough to be a pane
+    // - everything a toolbar icon read as a marker managed on a real capture.
+    // But the quad's left side now runs thirty degrees off the vertical, and
+    // the L's upright arm does not.
+    const report = inspectMarkers(buildScene({ displaced: { corner: "tl", dx: 100 } }).image);
+    expect(report.candidates.tl).toBe(1);
+    expect(report.quad).toBeNull();
+    expect(report.outcome).toBe("no-plausible-quad");
   });
 
   it("says which stage the markers were lost at", () => {

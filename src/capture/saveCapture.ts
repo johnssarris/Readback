@@ -78,6 +78,8 @@ export function sidecar(record: CaptureRecord, name: string): string {
           blobs: report.blobs,
           candidates: report.candidates,
           quadsTried: report.quadsTried,
+          levels: report.levels,
+          agreeing: report.agreeing,
           ms: report.ms,
         },
         // What the camera granted, which is rarely what was asked for.

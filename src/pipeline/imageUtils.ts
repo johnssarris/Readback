@@ -124,12 +124,26 @@ export function soften(src: Float32Array, width: number, height: number, radius:
 
 /** Otsu's method: finds the luminance threshold that best separates `values` into two classes. */
 export function otsuThreshold(values: number[]): number {
-  const histogram = new Array(256).fill(0);
-  for (const v of values) {
-    histogram[Math.max(0, Math.min(255, Math.round(v)))]++;
-  }
+  return otsuOfHistogram(luminanceHistogram(values));
+}
 
-  const total = values.length;
+/** Counts of each whole luminance, 0 to 255. */
+export function luminanceHistogram(values: ArrayLike<number>): number[] {
+  const histogram = new Array(256).fill(0);
+  for (let i = 0; i < values.length; i++) {
+    histogram[Math.max(0, Math.min(255, Math.round(values[i])))]++;
+  }
+  return histogram;
+}
+
+/**
+ * Otsu's method on a histogram already counted, which is what lets one frame be
+ * split several ways without going back over its pixels.
+ */
+export function otsuOfHistogram(histogram: number[]): number {
+  let total = 0;
+  for (let t = 0; t < 256; t++) total += histogram[t];
+
   let sumAll = 0;
   for (let t = 0; t < 256; t++) sumAll += t * histogram[t];
 

@@ -25,6 +25,11 @@ function record(overrides: Partial<CaptureRecord> = {}): CaptureRecord {
       blobs: 598,
       candidates: { tl: 46, tr: 21, br: 30, bl: 52 },
       quadsTried: 1,
+      levels: [
+        { threshold: 54, outcome: "found" },
+        { threshold: 70, outcome: "found" },
+      ],
+      agreeing: 2,
       ms: 864,
     },
     track: { width: 1932, height: 2576, frameRate: 30 },
@@ -57,6 +62,11 @@ describe("sidecar", () => {
       blobs: 598,
       candidates: { tl: 46, tr: 21, br: 30, bl: 52 },
       quadsTried: 1,
+      levels: [
+        { threshold: 54, outcome: "found" },
+        { threshold: 70, outcome: "found" },
+      ],
+      agreeing: 2,
       ms: 864,
     });
     expect(meta.diagnostics.frame).toEqual({ width: 1932, height: 2576 });
