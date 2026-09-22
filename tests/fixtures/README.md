@@ -46,7 +46,9 @@ holding a `.jpg` and a `.json` under the same timestamped name. Unzip it here,
 put the text the window was showing beside it, and point the sidecar's `text`
 at that file — it is written as `REPLACE-ME.txt`, since only the person who
 took the shot knows what was on the screen. Everything else is filled in: the
-corners the capture was actually read at, and a `diagnostics` block with the
+corners the capture was actually read at, the pane's size when it was given on
+the start screen (which the capture measurements need), and a `diagnostics`
+block with the
 frame size, what the camera track was doing, and the detector's account of the
 frame. Nothing in the harness reads `diagnostics`; it is there for whoever is
 working out why that capture went wrong.

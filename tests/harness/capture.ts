@@ -1,6 +1,6 @@
 import { bilinearGraySample, luminance, median } from "../../src/pipeline/imageUtils";
 import { ARM, THICK } from "../../src/pipeline/markerGeometry";
-import { applyHomography, computeHomography, type Point } from "../../src/pipeline/rectify";
+import { applyHomography, cameraPxPerScreenPx, computeHomography, type Point } from "../../src/pipeline/rectify";
 
 /**
  * What a capture was like as a photograph, measured in screen pixels.
@@ -51,7 +51,7 @@ export function measureCapture(image: ImageData, corners: Point[], pane: { width
   };
 
   return {
-    density: Math.sqrt(quadArea(corners) / (W * H)),
+    density: cameraPxPerScreenPx(corners, pane),
     blurPx: markerBlur(at, W, H),
     bowPx: { top: boundaryBow(at, W, 0, 1), bottom: boundaryBow(at, W, H, -1) },
   };
@@ -218,14 +218,4 @@ function fitParabola(points: Array<{ u: number; d: number }>): { a: number; b: n
   if (Math.abs(D) < 1e-9) return null;
   const withColumn = (k: number) => M.map((row, i) => row.map((v, j) => (j === k ? [t0, t1, t2][i] : v)));
   return { a: det(withColumn(0)) / D, b: det(withColumn(1)) / D, c: det(withColumn(2)) / D };
-}
-
-function quadArea(quad: Point[]): number {
-  let sum = 0;
-  for (let i = 0; i < quad.length; i++) {
-    const a = quad[i];
-    const b = quad[(i + 1) % quad.length];
-    sum += a.x * b.y - b.x * a.y;
-  }
-  return Math.abs(sum) / 2;
 }

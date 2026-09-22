@@ -2,8 +2,7 @@
 
 A plan, not a record of what was built. It takes the list of ideas that came
 out of getting the corner markers working, checks each against the code as of
-43b2b59, and puts what is left in an order. Step 1 is done; nothing after it has been
-implemented.
+43b2b59, and puts what is left in an order. Steps 1 and 2 are done in code; nothing after them has been implemented.
 
 ## What the photographs say
 
@@ -254,6 +253,14 @@ Each step names the number that should move.
 2. **Resolution.** Ask `getUserMedia` for 4K, and confirm with Save what the
    phone actually delivers. The biggest single lever, and upstream of
    everything else. Moves: camera px per screen px, blur, CER.
+   In the app: it asks for 3840 x 2160, shows after freezing the frame it got
+   and, with the pane size given, the camera px per screen px; a saved capture
+   carries the pane size so it is measured unedited. The detector finds all
+   eleven video captures at twice their size, at the first threshold, within
+   about a pixel of before, in ~0.9 s for a full 4K frame on a desktop. Still
+   to do on the phone: see what Safari grants, and whether the density and
+   CER move. If it stops at 1080p, the next thing to try is the native camera
+   through a file input, which hands over a full-resolution still.
 3. **Screen profile and 2x output.** `overlay.py` prints the Scintilla values;
    the app takes them beside the pane size; `RECTIFIED_SIZING` becomes source
    at 2x; the 2% stale-size check; `calibrateCellPitch` shrinks to the
