@@ -1,4 +1,12 @@
-import { estimateAspectRatio, normalizeQuad, warpImageData, type Point } from "../pipeline/rectify";
+import {
+  assumedIntrinsics,
+  estimatePaneAspect,
+  normalizeQuad,
+  warpImageData,
+  type PaneAspect,
+  type Point,
+} from "../pipeline/rectify";
+import { loadPaneSize } from "../settings";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
 import type { Framing } from "../pipeline/margins";
@@ -244,9 +252,11 @@ export class CaptureController {
     this.saveBtn.disabled = true;
     this.saveBtn.textContent = "Saving…";
 
+    const quad = normalizeQuad(CORNER_ORDER.map((c) => this.points[c]));
     saveCapture({
       frame: this.frame,
       corners: this.points,
+      aspect: quad ? this.paneAspect(quad) : null,
       fromMarkers: this.fromMarkers,
       report: this.report,
       track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
@@ -371,7 +381,7 @@ export class CaptureController {
       this.hint.textContent = "Those corners don't make a pane. Drag each one onto a corner of the window, then read.";
       return;
     }
-    const aspect = estimateAspectRatio(srcCorners);
+    const { aspect } = this.paneAspect(srcCorners);
 
     const destWidth = 1600;
     const destHeight = Math.round(destWidth / aspect);
@@ -381,6 +391,15 @@ export class CaptureController {
     const warped = warpImageData(source, source.width, source.height, srcCorners, destWidth, destHeight);
     const rectified = new ImageData(warped.data as Uint8ClampedArray<ArrayBuffer>, warped.width, warped.height);
     void this.showResult(rectified, this.fromMarkers ? "pane" : "window");
+  }
+
+  /** The pane's proportions: as given on the start screen, or else from the corners and the camera. */
+  private paneAspect(corners: Point[]): PaneAspect {
+    const known = loadPaneSize();
+    return estimatePaneAspect(corners, {
+      knownAspect: known ? known.width / known.height : undefined,
+      intrinsics: assumedIntrinsics(this.frame.width, this.frame.height),
+    });
   }
 
   /**

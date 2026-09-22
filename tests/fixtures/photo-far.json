@@ -1,5 +1,6 @@
 {
   "kind": "photo",
   "text": "notepad-plain-view.txt",
-  "note": "Notepad++ 8.x plain view, dark chrome, overlay.py markers, iPhone, whole monitor in frame"
+  "note": "Notepad++ 8.x plain view, dark chrome, overlay.py markers, iPhone, whole monitor in frame",
+  "frame": { "width": 1932, "height": 2576, "cropX": 0, "cropY": 0 }
 }

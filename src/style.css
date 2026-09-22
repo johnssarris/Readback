@@ -263,6 +263,33 @@ html, body {
   font-size: 0.95rem;
 }
 
+.pane-size {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.pane-size input {
+  width: 9rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.pane-size-status {
+  min-height: 1em;
+  color: #64748b;
+}
+
 .version-badge {
   margin: 1rem 0 0;
   font-size: 0.75rem;

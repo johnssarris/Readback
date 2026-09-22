@@ -8,8 +8,9 @@ import { analyzeCapture } from "../../src/pipeline/analyze";
 import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "../../src/pipeline/match";
 import {
   applyHomography,
+  assumedIntrinsics,
   computeHomography,
-  estimateAspectRatio,
+  estimatePaneAspect,
   warpImageData,
   type Point,
 } from "../../src/pipeline/rectify";
@@ -96,7 +97,13 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     ];
   }
 
-  const aspect = estimateAspectRatio(corners);
+  // The app knows the frame it took; a fixture says so in its sidecar. Without
+  // one - a render, or the camera simulation, which is not a pinhole camera -
+  // there is no camera to reason about, and the edges are averaged.
+  const frame = fixture.meta.frame;
+  const { aspect } = estimatePaneAspect(corners, {
+    intrinsics: frame ? assumedIntrinsics(frame.width, frame.height, { x: frame.cropX, y: frame.cropY }) : undefined,
+  });
   const destHeight = Math.round(DEST_WIDTH / aspect);
   const warped = warpImageData(image, image.width, image.height, corners, DEST_WIDTH, destHeight);
   const rectified = makeImageData(warped.width, warped.height, warped.data);

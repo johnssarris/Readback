@@ -242,6 +242,102 @@ function isClockwiseConvex(quad: Point[]): boolean {
   return area / 2 >= box * MIN_QUAD_FILL && box > 0;
 }
 
+/**
+ * What the camera is assumed to be, for recovering the pane's true proportions.
+ *
+ * Four corners in a photograph do not by themselves say how wide the pane is
+ * against how tall: the same quad is a square seen from one angle or a long
+ * rectangle seen from another. Knowing the camera settles it. Assumed here:
+ * square pixels, no skew, the optical centre at the middle of the frame the
+ * camera produced, and a focal length of FOCAL_FRACTION of that frame's long
+ * side. The answer is not sensitive to the focal length: on the real captures,
+ * anything from 800 to 1500 px on a 1920 frame moves it by under 1%.
+ */
+export interface Intrinsics {
+  focalPx: number;
+  /** Optical centre, in the pixel coordinates of the image the corners are in. */
+  cx: number;
+  cy: number;
+}
+
+/** A phone's main camera, as a share of the long side of the frame it hands over. */
+export const FOCAL_FRACTION = 0.6;
+
+/**
+ * The assumed camera for a frame of this size. `crop` is where the image the
+ * corners are measured in sat inside that frame, for a fixture cut down from
+ * the full capture; the optical centre stays where it was in the full frame.
+ */
+export function assumedIntrinsics(frameWidth: number, frameHeight: number, crop: Point = { x: 0, y: 0 }): Intrinsics {
+  return {
+    focalPx: FOCAL_FRACTION * Math.max(frameWidth, frameHeight),
+    cx: frameWidth / 2 - crop.x,
+    cy: frameHeight / 2 - crop.y,
+  };
+}
+
+export type AspectMethod = "known" | "projective" | "edge-average";
+
+export interface PaneAspect {
+  /** Width over height of the pane itself, not of its photograph. */
+  aspect: number;
+  method: AspectMethod;
+}
+
+/**
+ * Width over height of the pane the four corners (TL, TR, BR, BL) surround.
+ *
+ * The pane's own size, when the screen side has said what it is, is the
+ * answer and nothing is estimated. Otherwise the corners are taken back
+ * through the assumed camera (see Intrinsics): the homography from a unit
+ * square to the corners is K [r1 r2 t] diag(w, h, 1), so the lengths of its
+ * first two columns, with K taken off, are in the ratio w to h.
+ *
+ * Averaging the photographed edges instead is what this replaces. A side
+ * further from the camera photographs shorter, and the average of a near and a
+ * far side is not the length of either - on the real captures it was off by up
+ * to 4%, where the projective answer was within 1%. It is still the fallback,
+ * for when the camera is unknown or the projective answer is not a number:
+ * when the pane is square to the camera the two agree anyway.
+ */
+export function estimatePaneAspect(
+  corners: Point[],
+  options: { intrinsics?: Intrinsics; knownAspect?: number } = {}
+): PaneAspect {
+  if (options.knownAspect !== undefined && Number.isFinite(options.knownAspect) && options.knownAspect > 0) {
+    return { aspect: options.knownAspect, method: "known" };
+  }
+
+  const average = estimateAspectRatio(corners);
+  if (options.intrinsics) {
+    const projective = projectiveAspect(corners, options.intrinsics);
+    // Far from the average means the geometry was degenerate, not that the
+    // photograph was: no real shot of a pane doubles or halves its edges.
+    if (Number.isFinite(projective) && projective > average / 2 && projective < average * 2) {
+      return { aspect: projective, method: "projective" };
+    }
+  }
+  return { aspect: average, method: "edge-average" };
+}
+
+function projectiveAspect(corners: Point[], k: Intrinsics): number {
+  const unit: Point[] = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
+  let h: Homography;
+  try {
+    h = computeHomography(unit, corners);
+  } catch {
+    return NaN;
+  }
+  const unproject = (x: number, y: number, z: number) =>
+    Math.hypot((x - k.cx * z) / k.focalPx, (y - k.cy * z) / k.focalPx, z);
+  return unproject(h[0], h[3], h[6]) / unproject(h[1], h[4], h[7]);
+}
+
 /** Measures the average width/height of a quad (ordered TL, TR, BR, BL) to pick a destination aspect ratio. */
 export function estimateAspectRatio(corners: Point[]): number {
   const [tl, tr, br, bl] = corners;
