@@ -1,4 +1,6 @@
 {
+  "kind": "photo",
+  "text": "notepad-plain-view-top.txt",
   "note": "Readback capture 2026-09-22 12:18:10, Notepad++ plain view, overlay.py markers. The detector at 3361f44 said: no-plausible-quad. Cropped losslessly to the monitor (y 400-1344 of the 1080x1920 frame). Corners checked by eye against a 5x zoom of each marker.",
   "corners": [
     [56.6, 232.6],

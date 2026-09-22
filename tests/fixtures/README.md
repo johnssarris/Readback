@@ -92,22 +92,33 @@ that need it are skipped for fixtures that don't have it; everything measurable
 from the text alone — row count, ink accuracy, indentation, CER — is reported
 either way.
 
-## Marker-only captures: `markers/`
+## Marker captures: `markers/`
 
-Photos kept for the corner-marker detector alone, not the whole pipeline. The
-harness above reads only this directory's top level, so they never enter the
-metrics table, and they need no ground-truth text. Instead each carries the
-four pane corners, found by eye on a zoomed crop of each marker:
+Photos first kept for the corner-marker detector, each carrying the four pane
+corners, found by eye on a zoomed crop of each marker, and the pane's size as
+`overlay.py` printed it:
 
 ```json
 {
+  "kind": "photo",
+  "text": "notepad-plain-view-top.txt",
   "note": "what the shot is, and what the detector made of it before",
-  "corners": [[73.4, 196.9], [993.9, 215], [960.4, 722], [95.6, 718]]
+  "corners": [[73.4, 196.9], [993.9, 215], [960.4, 722], [95.6, 718]],
+  "frame": { "width": 1080, "height": 1920, "cropX": 0, "cropY": 400 },
+  "paneSize": { "width": 985, "height": 563 }
 }
 ```
 
 `tests/markers.photos.test.ts` requires every one of them, and the three
-`photo-*` fixtures above, to be found with every corner within 3 px.
+`photo-*` fixtures above, to be found with every corner within 3 px. Those
+corners were checked by eye against the detector's own answer, so they agree
+with it to a few hundredths of a pixel: the gate catches a detector that has
+got worse, and cannot show one that has got more precise.
+
+A capture whose sidecar names its `text` also joins the metrics run. All eleven
+here show lines 7-30 of the `plain_view.py` that was open when they were taken,
+which is `notepad-plain-view-top.txt`; one without `text` stays the detector's
+alone.
 
 A capture saved from the app goes in cropped to the monitor, so nothing on
 the desk around it is committed. Crop losslessly, with offsets on 16 px
@@ -117,6 +128,23 @@ corners:
 ```sh
 jpegtran -copy none -crop 1080x944+0+400 -outfile markers/capture-121834.jpg readback-20260922-121834.jpg
 ```
+
+## Capture measurements
+
+For a photo whose markers are found and whose sidecar gives `paneSize`, the
+metrics table measures the shot itself, in screen pixels
+(`tests/harness/capture.ts`):
+
+- **dens** - camera pixels per screen pixel, over the pane's area. Below 1 the
+  camera has fewer samples than the screen has pixels.
+- **blur** - the 10-90% rise across the markers' inner edges. A perfectly sharp
+  edge reads 0.8 here, not 0: that is bilinear sampling of a step.
+- **bow** - how far the middle of the pane's top and bottom boundaries sits
+  from the straight line between their ends, positive toward the inside.
+
+For every fixture, **wander** is how far apart the column grid's best phase is
+in different sixths of the line, in cells (`columnWander`): zero when one grid
+fits the whole line.
 
 ## Flat and camera
 

@@ -48,14 +48,6 @@ const PIPELINE_PHOTOS: Record<string, Array<[number, number]>> = {
   ],
 };
 
-/**
- * The pane every one of these photographs shows, as overlay.py reported it on
- * the machine: 985 x 563 px at 100% scaling. The captures in markers/ carry it
- * in their sidecars; the three whole-pipeline photographs are the same window
- * in the same setup.
- */
-const PANE = { width: 985, height: 563 };
-
 /** How far the recovered width-to-height ratio may be from the pane's own. */
 const ASPECT_TOLERANCE = 0.015;
 
@@ -82,7 +74,8 @@ const cases: Case[] = [
     path: join(FIXTURE_DIR, name),
     corners,
     frame: PHOTO_FRAME,
-    paneSize: PANE,
+    // Every sidecar says what overlay.py printed for the pane it shows.
+    paneSize: (JSON.parse(readFileSync(join(FIXTURE_DIR, name.replace(/\.jpg$/, ".json")), "utf8")) as Case).paneSize,
   })),
   ...readdirSync(MARKER_DIR)
     .filter((f) => f.endsWith(".json"))
