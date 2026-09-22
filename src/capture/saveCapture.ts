@@ -1,6 +1,6 @@
 import { APP_VERSION, BUILD_DATE } from "../version";
 import type { MarkerReport } from "../pipeline/markers";
-import type { Point } from "../pipeline/rectify";
+import type { PaneAspect, Point } from "../pipeline/rectify";
 import { buildZip } from "./zip";
 
 /**
@@ -30,6 +30,8 @@ export interface CaptureRecord {
   report: MarkerReport;
   /** What the camera was actually doing, as the track reports it. */
   track: MediaTrackSettings | null;
+  /** The pane's proportions as a read would take them, and where they came from. */
+  aspect?: PaneAspect | null;
 }
 
 /**
@@ -56,7 +58,7 @@ export async function saveCapture(record: CaptureRecord, now = new Date()): Prom
 
 /** The sidecar, in the shape tests/fixtures/README.md describes. */
 export function sidecar(record: CaptureRecord, name: string): string {
-  const { corners, report, track, frame } = record;
+  const { corners, report, track, frame, aspect } = record;
 
   return `${JSON.stringify(
     {
@@ -69,8 +71,12 @@ export function sidecar(record: CaptureRecord, name: string): string {
         Math.round(corners[c as keyof typeof corners].x),
         Math.round(corners[c as keyof typeof corners].y),
       ]),
+      // The whole frame, uncropped: the camera's optical centre is taken to be
+      // its middle, so a fixture cut down from it has to say where it was cut.
+      frame: { width: frame.width, height: frame.height, cropX: 0, cropY: 0 },
       diagnostics: {
         frame: { width: frame.width, height: frame.height },
+        aspect: aspect ? { value: Number(aspect.aspect.toFixed(4)), method: aspect.method } : null,
         cornersFrom: record.fromMarkers ? "markers" : "hand",
         markers: {
           outcome: report.outcome,

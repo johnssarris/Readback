@@ -3,17 +3,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { calibrateCellPitch, type CellPitch } from "../../src/pipeline/calibrate";
-import { detectMargins, type MarginBounds } from "../../src/pipeline/margins";
+import type { MarginBounds } from "../../src/pipeline/margins";
+import { analyzeCapture } from "../../src/pipeline/analyze";
 import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "../../src/pipeline/match";
 import {
   applyHomography,
+  assumedIntrinsics,
   computeHomography,
-  estimateAspectRatio,
-  warpImageData,
+  rectifyFrame,
+  type OutputSizing,
   type Point,
 } from "../../src/pipeline/rectify";
 import { inspectMarkers, type MarkerReport } from "../../src/pipeline/markers";
-import { buildRows, rowsToText } from "../../src/model/lineIndex";
+import { rowsToText } from "../../src/model/lineIndex";
+import { RECTIFIED_SIZING } from "../../src/pipeline/analyze";
 import { photograph, type CameraOptions } from "./degrade";
 import type { Fixture } from "./cases";
 import { makeImageData } from "./image";
@@ -26,8 +29,18 @@ import {
   type Metrics,
 } from "./metrics";
 
-/** Mirrors CaptureController: every capture is rectified to this width. */
-const DEST_WIDTH = 1600;
+/**
+ * How big to rectify each capture: the app's own choice, unless the run says
+ * otherwise - READBACK_SIZING=fixed:1600 or source:1.25 - for comparing one
+ * setting against another on the same fixtures.
+ */
+export const SIZING: OutputSizing = parseSizing(process.env.READBACK_SIZING) ?? RECTIFIED_SIZING;
+
+function parseSizing(text: string | undefined): OutputSizing | null {
+  const match = text?.match(/^(fixed|source):([\d.]+)$/);
+  if (!match) return null;
+  return match[1] === "fixed" ? { kind: "fixed", width: Number(match[2]) } : { kind: "source", oversample: Number(match[2]) };
+}
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -44,6 +57,8 @@ export interface RunResult {
   scale: { x: number; y: number };
   /** Why the run produced nothing, when it did; null when the pipeline ran. */
   unreadable: string | null;
+  /** How the rectified image was made: its size, where its proportions came from, and how long the warp took. */
+  warp: { width: number; height: number; aspect: number; method: string; ms: number } | null;
 }
 
 /**
@@ -95,14 +110,32 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     ];
   }
 
-  const aspect = estimateAspectRatio(corners);
-  const destHeight = Math.round(DEST_WIDTH / aspect);
-  const warped = warpImageData(image, image.width, image.height, corners, DEST_WIDTH, destHeight);
+  // The app knows the frame it took; a fixture says so in its sidecar. Without
+  // one - a render, or the camera simulation, which is not a pinhole camera -
+  // there is no camera to reason about, and the edges are averaged.
+  const frame = fixture.meta.frame;
+  const started = performance.now();
+  const warped = rectifyFrame(image, corners, {
+    sizing: SIZING,
+    intrinsics: frame ? assumedIntrinsics(frame.width, frame.height, { x: frame.cropX, y: frame.cropY }) : undefined,
+  });
+  if (!warped) throw new Error(`${fixture.name}: its corners are not a quad`);
+  const warp = {
+    width: warped.width,
+    height: warped.height,
+    aspect: warped.aspect.aspect,
+    method: warped.aspect.method,
+    ms: performance.now() - started,
+  };
   const rectified = makeImageData(warped.width, warped.height, warped.data);
 
   // Markers name the pane itself, so what was rectified has no chrome in it.
-  const margins = detectMargins(rectified, markers ? "pane" : "window");
-  const pitch = calibrateCellPitch(rectified, margins);
+  // The same call the app makes, so what is measured is what the app reads.
+  const atlas = loadAtlas();
+  const analysis = analyzeCapture(rectified, markers ? "pane" : "window", atlas);
+  if (!analysis.margins) throw new Error(analysis.summary.join("; "));
+  const margins = analysis.margins;
+  const pitch = analysis.pitch ?? calibrateCellPitch(rectified, margins);
 
   // Truth is recorded in the drawn image's own coordinates. What was rectified
   // is the pane when markers named it, and the whole window otherwise, so the
@@ -110,9 +143,9 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   const pane = fixture.meta.truth?.paneRect;
   const region = pane
     ? { left: pane.left, top: pane.top, width: pane.right - pane.left, height: pane.bottom - pane.top }
-    : { left: 0, top: 0, width: source.width, height: destHeight === 0 ? 1 : source.height };
+    : { left: 0, top: 0, width: source.width, height: source.height };
   const view = {
-    scale: { x: DEST_WIDTH / region.width, y: destHeight / region.height },
+    scale: { x: warped.width / region.width, y: warped.height / region.height },
     origin: { x: region.left, y: region.top },
   };
   const metrics = score(fixture, rectified, margins, pitch, view);
@@ -132,9 +165,8 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   }
 
   let text: string | null = null;
-  const atlas = loadAtlas();
-  if (atlas && Number.isFinite(pitch.widthPx) && pitch.widthPx > 0 && pitch.rowYCenters.length > 0) {
-    const rows = buildRows(rectified, margins, pitch, atlas);
+  const rows = analysis.rows;
+  if (rows) {
     text = rowsToText(rows);
     metrics.cer = characterErrorRate(text, fixture.lines.join("\n"));
 
@@ -142,7 +174,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
-  return { margins, pitch, metrics, text, rectified, scale: view.scale, unreadable: null };
+  return { margins, pitch, metrics, text, rectified, scale: view.scale, unreadable: null, warp };
 }
 
 /**
@@ -171,6 +203,7 @@ function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunRe
     text: null,
     rectified: image,
     scale: { x: 1, y: 1 },
+    warp: null,
     unreadable:
       `${report.outcome} (ink<=${report.threshold}, ${report.blobs} blobs, ` +
       `${CORNER_ORDER.map((c) => `${c}:${report.candidates[c]}`).join(" ")}, ` +

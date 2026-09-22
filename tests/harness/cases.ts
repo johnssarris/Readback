@@ -30,6 +30,12 @@ export interface FixtureMeta {
    * whoever is looking into why this particular capture went wrong.
    */
   diagnostics?: unknown;
+  /**
+   * The frame the camera produced, and where this image was cut from it. The
+   * optical centre is assumed to be the middle of that frame, so a fixture
+   * cropped down from a capture has to say where the crop was.
+   */
+  frame?: { width: number; height: number; cropX: number; cropY: number };
   /** Known geometry, when the fixture was generated rather than captured. */
   truth?: {
     cellWidthPx: number;

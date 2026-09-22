@@ -36,7 +36,7 @@ describe("pipeline metrics", () => {
       if (fixture.meta.kind === "photo" && mode === "camera") continue;
 
       it(`${fixture.name} [${mode}]`, () => {
-        const { metrics, margins, pitch, unreadable } = runFixture(fixture, mode);
+        const { metrics, margins, pitch, unreadable, warp } = runFixture(fixture, mode);
 
         // Nothing downstream ran, so there are no numbers to print - only the
         // reason, which is the whole result for that row.
@@ -57,7 +57,8 @@ describe("pipeline metrics", () => {
             `indent ${fmt(metrics.indentAccuracy * 100, 1, "%")}`.padEnd(15),
             `cer ${metrics.cer === null ? "n/a" : fmt(metrics.cer * 100, 2, "%")}`.padEnd(13),
             `num ${metrics.numberAccuracy === null ? "n/a" : fmt(metrics.numberAccuracy * 100, 1, "%")}`.padEnd(12),
-            `marker ${metrics.markerErrorPx === null ? "n/a" : fmt(metrics.markerErrorPx, 2, "px")}`,
+            `marker ${metrics.markerErrorPx === null ? "n/a" : fmt(metrics.markerErrorPx, 2, "px")}`.padEnd(15),
+            warp ? `out ${warp.width}x${warp.height} ${warp.aspect.toFixed(3)} ${warp.method} ${warp.ms.toFixed(0)}ms` : "",
           ].join(" ")
         );
 

@@ -129,99 +129,195 @@ export function warpImageData(
   ];
 
   const forward = computeHomography(srcCorners, dstCorners);
-  const inverse = invertHomography(forward);
+  const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = invertHomography(forward);
+  const src = srcData.data;
 
+  // Inverse mapping, one row at a time: the three homogeneous coordinates are
+  // linear along a row, so each is a running sum rather than a matrix product
+  // per pixel. Samples are bilinear, on pixel centres; outside the frame is black.
   const out = new Uint8ClampedArray(destWidth * destHeight * 4);
   for (let dy = 0; dy < destHeight; dy++) {
-    for (let dx = 0; dx < destWidth; dx++) {
-      const srcPoint = applyHomography(inverse, { x: dx + 0.5, y: dy + 0.5 });
-      const sample = bilinearSample(srcData, sourceWidth, sourceHeight, srcPoint.x, srcPoint.y);
-      const di = (dy * destWidth + dx) * 4;
-      out[di] = sample[0];
-      out[di + 1] = sample[1];
-      out[di + 2] = sample[2];
-      out[di + 3] = sample[3];
+    const py = dy + 0.5;
+    let nx = h0 * 0.5 + h1 * py + h2;
+    let ny = h3 * 0.5 + h4 * py + h5;
+    let nw = h6 * 0.5 + h7 * py + h8;
+    let di = dy * destWidth * 4;
+    for (let dx = 0; dx < destWidth; dx++, nx += h0, ny += h3, nw += h6, di += 4) {
+      const x = nx / nw;
+      const y = ny / nw;
+      if (!(x >= 0 && y >= 0 && x < sourceWidth && y < sourceHeight)) {
+        out[di + 3] = 255;
+        continue;
+      }
+      const x0 = Math.floor(x - 0.5);
+      const y0 = Math.floor(y - 0.5);
+      const fx = x - 0.5 - x0;
+      const fy = y - 0.5 - y0;
+      const cx0 = x0 < 0 ? 0 : x0;
+      const cx1 = x0 + 1 > sourceWidth - 1 ? sourceWidth - 1 : x0 + 1;
+      const cy0 = y0 < 0 ? 0 : y0;
+      const cy1 = y0 + 1 > sourceHeight - 1 ? sourceHeight - 1 : y0 + 1;
+      const i00 = (cy0 * sourceWidth + cx0) * 4;
+      const i10 = (cy0 * sourceWidth + cx1) * 4;
+      const i01 = (cy1 * sourceWidth + cx0) * 4;
+      const i11 = (cy1 * sourceWidth + cx1) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = src[i00 + c] * (1 - fx) + src[i10 + c] * fx;
+        const bottom = src[i01 + c] * (1 - fx) + src[i11 + c] * fx;
+        out[di + c] = top * (1 - fy) + bottom * fy;
+      }
     }
   }
 
   return { width: destWidth, height: destHeight, data: out };
 }
 
+export type Quad = [Point, Point, Point, Point];
+
 /**
- * Warps `source` (mapping its `srcCorners` quad to a flat destWidth x destHeight
- * rectangle) into a new canvas.
+ * The four corners as TL, TR, BR, BL, or null if they do not make a quad.
+ *
+ * The markers always come out that way - each L says which corner it is, and
+ * the detector rejects any four that cross over - so a quad that is already
+ * convex and clockwise is returned as it is. Dragged handles promise nothing:
+ * two can be swapped, or the whole box turned inside out, and warped as given
+ * that folds or mirrors the page. Those are put back in order round their
+ * centre, starting from the corner nearest the top left. Four points that are
+ * not a convex quad in any order - three in a line, or one inside the other
+ * three - have no pane to rectify.
  */
-export function warpPerspective(
-  source: CanvasImageSource,
-  sourceWidth: number,
-  sourceHeight: number,
-  srcCorners: Point[],
-  destWidth: number,
-  destHeight: number
-): HTMLCanvasElement {
-  const srcCanvas = document.createElement("canvas");
-  srcCanvas.width = sourceWidth;
-  srcCanvas.height = sourceHeight;
-  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
-  srcCtx.drawImage(source, 0, 0, sourceWidth, sourceHeight);
-  const srcData = srcCtx.getImageData(0, 0, sourceWidth, sourceHeight);
+export function normalizeQuad(points: Point[]): Quad | null {
+  if (points.length !== 4 || points.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+  if (isClockwiseConvex(points)) return [points[0], points[1], points[2], points[3]];
 
-  const warped = warpImageData(srcData, sourceWidth, sourceHeight, srcCorners, destWidth, destHeight);
-
-  const destCanvas = document.createElement("canvas");
-  destCanvas.width = destWidth;
-  destCanvas.height = destHeight;
-  const destCtx = destCanvas.getContext("2d")!;
-  const destData = destCtx.createImageData(destWidth, destHeight);
-  destData.data.set(warped.data);
-  destCtx.putImageData(destData, 0, 0);
-  return destCanvas;
+  const cx = (points[0].x + points[1].x + points[2].x + points[3].x) / 4;
+  const cy = (points[0].y + points[1].y + points[2].y + points[3].y) / 4;
+  // Image y points down, so increasing angle goes clockwise on screen.
+  const around = [...points].sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  let first = 0;
+  for (let i = 1; i < 4; i++) {
+    if (around[i].x + around[i].y < around[first].x + around[first].y) first = i;
+  }
+  const ordered = [0, 1, 2, 3].map((i) => around[(first + i) % 4]) as Quad;
+  return isClockwiseConvex(ordered) ? ordered : null;
 }
 
-function bilinearSample(
-  data: ImageData,
-  width: number,
-  height: number,
-  x: number,
-  y: number
-): [number, number, number, number] {
-  if (x < 0 || y < 0 || x >= width || y >= height) {
-    return [0, 0, 0, 255];
+/** Smallest area, as a share of the quad's bounding box, that still counts as a quad rather than a line. */
+const MIN_QUAD_FILL = 0.05;
+
+function isClockwiseConvex(quad: Point[]): boolean {
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i];
+    const b = quad[(i + 1) % 4];
+    const c = quad[(i + 2) % 4];
+    // Each turn clockwise on screen, which with y down is a positive cross product.
+    if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) <= 0) return false;
+    area += a.x * b.y - b.x * a.y;
+  }
+  const xs = quad.map((p) => p.x);
+  const ys = quad.map((p) => p.y);
+  const box = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  return area / 2 >= box * MIN_QUAD_FILL && box > 0;
+}
+
+/**
+ * What the camera is assumed to be, for recovering the pane's true proportions.
+ *
+ * Four corners in a photograph do not by themselves say how wide the pane is
+ * against how tall: the same quad is a square seen from one angle or a long
+ * rectangle seen from another. Knowing the camera settles it. Assumed here:
+ * square pixels, no skew, the optical centre at the middle of the frame the
+ * camera produced, and a focal length of FOCAL_FRACTION of that frame's long
+ * side. How much the answer leans on the focal length grows with how steeply
+ * the pane is seen. At the angles the real captures were taken from, anything
+ * from 800 to 1500 px on a 1920 frame moves it by about 1%; a pane seen 20-30
+ * degrees off square, with the lens 30% off, can be a few percent out - still
+ * about half the error of averaging the edges (tests/rectify.geometry.test.ts).
+ */
+export interface Intrinsics {
+  focalPx: number;
+  /** Optical centre, in the pixel coordinates of the image the corners are in. */
+  cx: number;
+  cy: number;
+}
+
+/** A phone's main camera, as a share of the long side of the frame it hands over. */
+export const FOCAL_FRACTION = 0.6;
+
+/**
+ * The assumed camera for a frame of this size. `crop` is where the image the
+ * corners are measured in sat inside that frame, for a fixture cut down from
+ * the full capture; the optical centre stays where it was in the full frame.
+ */
+export function assumedIntrinsics(frameWidth: number, frameHeight: number, crop: Point = { x: 0, y: 0 }): Intrinsics {
+  return {
+    focalPx: FOCAL_FRACTION * Math.max(frameWidth, frameHeight),
+    cx: frameWidth / 2 - crop.x,
+    cy: frameHeight / 2 - crop.y,
+  };
+}
+
+export type AspectMethod = "known" | "projective" | "edge-average";
+
+export interface PaneAspect {
+  /** Width over height of the pane itself, not of its photograph. */
+  aspect: number;
+  method: AspectMethod;
+}
+
+/**
+ * Width over height of the pane the four corners (TL, TR, BR, BL) surround.
+ *
+ * The pane's own size, when the screen side has said what it is, is the
+ * answer and nothing is estimated. Otherwise the corners are taken back
+ * through the assumed camera (see Intrinsics): the homography from a unit
+ * square to the corners is K [r1 r2 t] diag(w, h, 1), so the lengths of its
+ * first two columns, with K taken off, are in the ratio w to h.
+ *
+ * Averaging the photographed edges instead is what this replaces. A side
+ * further from the camera photographs shorter, and the average of a near and a
+ * far side is not the length of either - on the real captures it was off by up
+ * to 4%, where the projective answer was within 1%. It is still the fallback,
+ * for when the camera is unknown or the projective answer is not a number:
+ * when the pane is square to the camera the two agree anyway.
+ */
+export function estimatePaneAspect(
+  corners: Point[],
+  options: { intrinsics?: Intrinsics; knownAspect?: number } = {}
+): PaneAspect {
+  if (options.knownAspect !== undefined && Number.isFinite(options.knownAspect) && options.knownAspect > 0) {
+    return { aspect: options.knownAspect, method: "known" };
   }
 
-  const x0 = Math.floor(x - 0.5);
-  const y0 = Math.floor(y - 0.5);
-  const x1 = x0 + 1;
-  const y1 = y0 + 1;
-  const fx = x - 0.5 - x0;
-  const fy = y - 0.5 - y0;
-
-  const cx0 = clamp(x0, 0, width - 1);
-  const cx1 = clamp(x1, 0, width - 1);
-  const cy0 = clamp(y0, 0, height - 1);
-  const cy1 = clamp(y1, 0, height - 1);
-
-  const p00 = pixelAt(data, width, cx0, cy0);
-  const p10 = pixelAt(data, width, cx1, cy0);
-  const p01 = pixelAt(data, width, cx0, cy1);
-  const p11 = pixelAt(data, width, cx1, cy1);
-
-  const result: [number, number, number, number] = [0, 0, 0, 0];
-  for (let c = 0; c < 4; c++) {
-    const top = p00[c] * (1 - fx) + p10[c] * fx;
-    const bottom = p01[c] * (1 - fx) + p11[c] * fx;
-    result[c] = top * (1 - fy) + bottom * fy;
+  const average = estimateAspectRatio(corners);
+  if (options.intrinsics) {
+    const projective = projectiveAspect(corners, options.intrinsics);
+    // Far from the average means the geometry was degenerate, not that the
+    // photograph was: no real shot of a pane doubles or halves its edges.
+    if (Number.isFinite(projective) && projective > average / 2 && projective < average * 2) {
+      return { aspect: projective, method: "projective" };
+    }
   }
-  return result;
+  return { aspect: average, method: "edge-average" };
 }
 
-function pixelAt(data: ImageData, width: number, x: number, y: number): [number, number, number, number] {
-  const i = (y * width + x) * 4;
-  return [data.data[i], data.data[i + 1], data.data[i + 2], data.data[i + 3]];
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
+function projectiveAspect(corners: Point[], k: Intrinsics): number {
+  const unit: Point[] = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
+  let h: Homography;
+  try {
+    h = computeHomography(unit, corners);
+  } catch {
+    return NaN;
+  }
+  const unproject = (x: number, y: number, z: number) =>
+    Math.hypot((x - k.cx * z) / k.focalPx, (y - k.cy * z) / k.focalPx, z);
+  return unproject(h[0], h[3], h[6]) / unproject(h[1], h[4], h[7]);
 }
 
 /** Measures the average width/height of a quad (ordered TL, TR, BR, BL) to pick a destination aspect ratio. */
@@ -238,4 +334,79 @@ export function estimateAspectRatio(corners: Point[]): number {
 
 function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * How big to make the rectified image.
+ *
+ * `fixed` is a set width, the height following from the aspect - what every
+ * capture used to get, at 1600. `source` follows the photograph instead: the
+ * longer of each pair of opposite edges, so no row or column of the pane is
+ * squeezed into fewer pixels than the camera gave it, times `oversample`. With
+ * the pane's own size known (overlay.py prints it), `source` is that size
+ * times `oversample` instead, so every capture of a pane lays its character
+ * cells out at the same size whatever distance it was taken from.
+ */
+export type OutputSizing =
+  | { kind: "fixed"; width: number }
+  | { kind: "source"; oversample: number; paneSize?: { width: number; height: number } };
+
+/** Bounds on the rectified image, so a still from a 12 MP camera cannot run a phone out of memory. */
+export const MAX_OUTPUT_WIDTH = 2400;
+export const MAX_OUTPUT_PIXELS = 4_000_000;
+
+export interface OutputSize {
+  width: number;
+  height: number;
+  /** Whether the bounds above cut it down from what was asked for. */
+  clamped: boolean;
+}
+
+export function chooseOutputSize(corners: Point[], aspect: number, sizing: OutputSizing): OutputSize {
+  let width: number;
+  if (sizing.kind === "fixed") {
+    width = sizing.width;
+  } else if (sizing.paneSize) {
+    width = sizing.paneSize.width * sizing.oversample;
+  } else {
+    const [tl, tr, br, bl] = corners;
+    const across = Math.max(distance(tl, tr), distance(bl, br));
+    const down = Math.max(distance(tl, bl), distance(tr, br));
+    width = Math.max(across, down * aspect) * sizing.oversample;
+  }
+
+  const limit = Math.min(MAX_OUTPUT_WIDTH, Math.sqrt(MAX_OUTPUT_PIXELS * aspect));
+  const clamped = width > limit;
+  if (clamped) width = limit;
+
+  const w = Math.max(1, Math.round(width));
+  return { width: w, height: Math.max(1, Math.round(w / aspect)), clamped };
+}
+
+export interface Rectified {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+  corners: Quad;
+  aspect: PaneAspect;
+  size: OutputSize;
+}
+
+/**
+ * The pane, flattened: corners put in order, proportions recovered, size
+ * chosen, then one warp from the photograph. The app and the metrics harness
+ * both go through here, so what is measured is what the app reads.
+ */
+export function rectifyFrame(
+  image: ImageData,
+  corners: Point[],
+  options: { sizing: OutputSizing; intrinsics?: Intrinsics; knownAspect?: number }
+): Rectified | null {
+  const quad = normalizeQuad(corners);
+  if (!quad) return null;
+
+  const aspect = estimatePaneAspect(quad, { intrinsics: options.intrinsics, knownAspect: options.knownAspect });
+  const size = chooseOutputSize(quad, aspect.aspect, options.sizing);
+  const warped = warpImageData(image, image.width, image.height, quad, size.width, size.height);
+  return { ...warped, corners: quad, aspect, size };
 }
