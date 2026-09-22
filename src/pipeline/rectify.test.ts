@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyHomography, computeHomography, estimateAspectRatio, invertHomography, type Point } from "./rectify";
+import { applyHomography, computeHomography, estimateAspectRatio, invertHomography, normalizeQuad, type Point } from "./rectify";
 
 function expectPointClose(a: Point, b: Point, precision = 6) {
   expect(a.x).toBeCloseTo(b.x, precision);
@@ -106,5 +106,47 @@ describe("estimateAspectRatio", () => {
       { x: -10, y: 100 },
     ];
     expect(estimateAspectRatio(corners)).toBeCloseTo(210 / 100, 1);
+  });
+});
+
+describe("normalizeQuad", () => {
+  const tl = { x: 100, y: 80 };
+  const tr = { x: 900, y: 120 };
+  const br = { x: 860, y: 600 };
+  const bl = { x: 130, y: 560 };
+
+  it("returns a clockwise quad from the markers exactly as given", () => {
+    const quad = [tl, tr, br, bl];
+    expect(normalizeQuad(quad)).toEqual(quad);
+  });
+
+  it("keeps a clockwise quad as given even when it is turned well past square", () => {
+    // Rotated about 40 degrees: the top-left corner is no longer the one
+    // nearest the image's top left, and must not be relabelled.
+    const quad = [
+      { x: 400, y: 100 },
+      { x: 900, y: 520 },
+      { x: 560, y: 900 },
+      { x: 80, y: 480 },
+    ];
+    expect(normalizeQuad(quad)).toEqual(quad);
+  });
+
+  it("puts counter-clockwise corners back in order", () => {
+    expect(normalizeQuad([tl, bl, br, tr])).toEqual([tl, tr, br, bl]);
+  });
+
+  it("starts a reordered quad from the top left whichever corner came first", () => {
+    expect(normalizeQuad([br, tr, tl, bl])).toEqual([tl, tr, br, bl]);
+  });
+
+  it("untangles two swapped corners (a bowtie)", () => {
+    expect(normalizeQuad([tl, tr, bl, br])).toEqual([tl, tr, br, bl]);
+  });
+
+  it("rejects points that are not a quad in any order", () => {
+    expect(normalizeQuad([tl, { x: 500, y: 100 }, tr, br])).toBeNull(); // three nearly in a line
+    expect(normalizeQuad([tl, tr, br, { x: 500, y: 300 }])).toBeNull(); // one inside the other three
+    expect(normalizeQuad([tl, tl, br, bl])).toBeNull(); // two the same
   });
 });

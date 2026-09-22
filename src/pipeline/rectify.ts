@@ -193,6 +193,55 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+export type Quad = [Point, Point, Point, Point];
+
+/**
+ * The four corners as TL, TR, BR, BL, or null if they do not make a quad.
+ *
+ * The markers always come out that way - each L says which corner it is, and
+ * the detector rejects any four that cross over - so a quad that is already
+ * convex and clockwise is returned as it is. Dragged handles promise nothing:
+ * two can be swapped, or the whole box turned inside out, and warped as given
+ * that folds or mirrors the page. Those are put back in order round their
+ * centre, starting from the corner nearest the top left. Four points that are
+ * not a convex quad in any order - three in a line, or one inside the other
+ * three - have no pane to rectify.
+ */
+export function normalizeQuad(points: Point[]): Quad | null {
+  if (points.length !== 4 || points.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+  if (isClockwiseConvex(points)) return [points[0], points[1], points[2], points[3]];
+
+  const cx = (points[0].x + points[1].x + points[2].x + points[3].x) / 4;
+  const cy = (points[0].y + points[1].y + points[2].y + points[3].y) / 4;
+  // Image y points down, so increasing angle goes clockwise on screen.
+  const around = [...points].sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  let first = 0;
+  for (let i = 1; i < 4; i++) {
+    if (around[i].x + around[i].y < around[first].x + around[first].y) first = i;
+  }
+  const ordered = [0, 1, 2, 3].map((i) => around[(first + i) % 4]) as Quad;
+  return isClockwiseConvex(ordered) ? ordered : null;
+}
+
+/** Smallest area, as a share of the quad's bounding box, that still counts as a quad rather than a line. */
+const MIN_QUAD_FILL = 0.05;
+
+function isClockwiseConvex(quad: Point[]): boolean {
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i];
+    const b = quad[(i + 1) % 4];
+    const c = quad[(i + 2) % 4];
+    // Each turn clockwise on screen, which with y down is a positive cross product.
+    if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) <= 0) return false;
+    area += a.x * b.y - b.x * a.y;
+  }
+  const xs = quad.map((p) => p.x);
+  const ys = quad.map((p) => p.y);
+  const box = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  return area / 2 >= box * MIN_QUAD_FILL && box > 0;
+}
+
 /** Measures the average width/height of a quad (ordered TL, TR, BR, BL) to pick a destination aspect ratio. */
 export function estimateAspectRatio(corners: Point[]): number {
   const [tl, tr, br, bl] = corners;

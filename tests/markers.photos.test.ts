@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { FIXTURE_DIR } from "./harness/cases";
 import { loadImage } from "./harness/image";
 import { inspectMarkers } from "../src/pipeline/markers";
+import { normalizeQuad } from "../src/pipeline/rectify";
 
 /**
  * The corner markers, found in real photographs of a real screen.
@@ -76,6 +77,9 @@ describe("markers in photographs", () => {
         const [x, y] = corners[i];
         expect(Math.hypot(corner.x - x, corner.y - y)).toBeLessThan(TOLERANCE_PX);
       });
+      // What the detector hands over is already in order, and the check that
+      // guards dragged corners must leave it exactly as it is.
+      expect(normalizeQuad(report.quad!.corners)).toEqual(report.quad!.corners);
     });
   }
 });

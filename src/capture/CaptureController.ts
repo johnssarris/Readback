@@ -1,4 +1,4 @@
-import { estimateAspectRatio, warpImageData, type Point } from "../pipeline/rectify";
+import { estimateAspectRatio, normalizeQuad, warpImageData, type Point } from "../pipeline/rectify";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
 import type { Framing } from "../pipeline/margins";
@@ -366,7 +366,11 @@ export class CaptureController {
   }
 
   private read(): void {
-    const srcCorners = CORNER_ORDER.map((c) => this.points[c]);
+    const srcCorners = normalizeQuad(CORNER_ORDER.map((c) => this.points[c]));
+    if (!srcCorners) {
+      this.hint.textContent = "Those corners don't make a pane. Drag each one onto a corner of the window, then read.";
+      return;
+    }
     const aspect = estimateAspectRatio(srcCorners);
 
     const destWidth = 1600;
