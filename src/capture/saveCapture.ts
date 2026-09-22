@@ -1,7 +1,7 @@
 import { APP_VERSION, BUILD_DATE } from "../version";
 import type { MarkerReport } from "../pipeline/markers";
 import type { PaneAspect, Point } from "../pipeline/rectify";
-import type { PaneSize } from "../settings";
+import type { ScreenProfile } from "../settings";
 import { buildZip } from "./zip";
 
 /**
@@ -33,8 +33,8 @@ export interface CaptureRecord {
   track: MediaTrackSettings | null;
   /** The pane's proportions as a read would take them, and where they came from. */
   aspect?: PaneAspect | null;
-  /** The pane's size on screen, as given on the start screen, when it was. */
-  paneSize?: PaneSize | null;
+  /** The screen profile as given on the start screen, when it was: the pane's size, and its grid if that was given too. */
+  screen?: ScreenProfile | null;
 }
 
 /**
@@ -61,7 +61,7 @@ export async function saveCapture(record: CaptureRecord, now = new Date()): Prom
 
 /** The sidecar, in the shape tests/fixtures/README.md describes. */
 export function sidecar(record: CaptureRecord, name: string): string {
-  const { corners, report, track, frame, aspect, paneSize } = record;
+  const { corners, report, track, frame, aspect, screen } = record;
 
   return `${JSON.stringify(
     {
@@ -80,7 +80,10 @@ export function sidecar(record: CaptureRecord, name: string): string {
       // What the harness measures the shot against - camera pixels per screen
       // pixel, blur and bow are all in screen pixels - so it goes in when it
       // is known rather than being typed in afterwards.
-      ...(paneSize ? { paneSize: { width: paneSize.width, height: paneSize.height } } : {}),
+      ...(screen ? { paneSize: { width: screen.pane.width, height: screen.pane.height } } : {}),
+      // And the grid, so the capture is read in the harness the way it was
+      // read here, profile and all.
+      ...(screen?.grid ? { profile: { ...screen.grid } } : {}),
       diagnostics: {
         frame: { width: frame.width, height: frame.height },
         aspect: aspect ? { value: Number(aspect.aspect.toFixed(4)), method: aspect.method } : null,

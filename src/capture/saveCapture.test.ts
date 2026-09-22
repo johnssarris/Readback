@@ -84,11 +84,20 @@ describe("sidecar", () => {
 
   // The capture measurements are in screen pixels, so a capture saved with
   // the pane's size is measured as soon as it is dropped in, unedited.
-  it("carries the pane's size when it was given, and leaves it out when not", () => {
-    const given = JSON.parse(sidecar(record({ paneSize: { width: 985, height: 563 } }), "x")) as FixtureMeta;
-    expect(given.paneSize).toEqual({ width: 985, height: 563 });
+  it("carries the screen profile as far as it was given, and leaves out what was not", () => {
+    const pane = { width: 985, height: 563 };
+    const grid = { advance: 10.75, lineHeight: 23, textLeft: 42 };
 
-    const absent = JSON.parse(sidecar(record(), "x")) as FixtureMeta;
-    expect(absent).not.toHaveProperty("paneSize");
+    const whole = JSON.parse(sidecar(record({ screen: { pane, grid } }), "x")) as FixtureMeta;
+    expect(whole.paneSize).toEqual(pane);
+    expect(whole.profile).toEqual(grid);
+
+    const sizeOnly = JSON.parse(sidecar(record({ screen: { pane, grid: null } }), "x")) as FixtureMeta;
+    expect(sizeOnly.paneSize).toEqual(pane);
+    expect(sizeOnly).not.toHaveProperty("profile");
+
+    const none = JSON.parse(sidecar(record(), "x")) as FixtureMeta;
+    expect(none).not.toHaveProperty("paneSize");
+    expect(none).not.toHaveProperty("profile");
   });
 });

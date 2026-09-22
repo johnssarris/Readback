@@ -131,6 +131,23 @@ describe("the pane's proportions, from its corners", () => {
     });
   }
 
+  // A pane size typed in before the window was resized describes some other
+  // pane. Every capture here says so, whichever way the window changed.
+  it("sets aside a given size the photographs disagree with", () => {
+    for (const { corners, frame, paneSize } of cases) {
+      const points = corners.map(([x, y]) => ({ x, y }));
+      const intrinsics = assumedIntrinsics(frame.width, frame.height, { x: frame.cropX, y: frame.cropY });
+      const truth = paneSize.width / paneSize.height;
+
+      expect(estimatePaneAspect(points, { intrinsics, knownAspect: truth })).toEqual({ aspect: truth, method: "known" });
+      for (const resized of [truth * 0.95, truth * 1.05]) {
+        const answer = estimatePaneAspect(points, { intrinsics, knownAspect: resized });
+        expect(answer.method).toBe("projective");
+        expect(answer.setAside).toBe(resized);
+      }
+    }
+  });
+
   it("is closer to the truth overall than averaging the edges", () => {
     const error = (estimate: (points: { x: number; y: number }[], c: Case) => number) =>
       cases.reduce((sum, c) => {

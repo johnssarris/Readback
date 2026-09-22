@@ -15,6 +15,14 @@ It follows the window as it moves or resizes, hides while Notepad++ isn't the
 active window, and exits when plain view is toggled off (plain_view.py deletes
 its state file) or Notepad++ closes.
 
+Whenever the pane or its font changes it prints a profile line:
+
+    profile: 985 x 563, cell 10.750 x 23, text at 42
+
+the pane's size, one character cell's width and height, and where the first
+column of text starts, all in pixels from the pane's top-left corner. If the
+cell can't be read, the line gives the size alone and the next line says why.
+
 Marker geometry. Sizes are at 100% display scaling and scale with the
 pane's DPI:
   - each marker is an L made of two black bars, ARM long and THICK wide
@@ -70,6 +78,8 @@ STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
 
 # ---- Windows API setup ----
 u32.FindWindowW.restype = wt.HWND
+u32.SendMessageW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+u32.SendMessageW.restype = ctypes.c_ssize_t
 u32.GetForegroundWindow.restype = wt.HWND
 u32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
 u32.IsWindow.argtypes = [wt.HWND]
@@ -84,6 +94,20 @@ u32.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
 u32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 u32.SetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int, ctypes.c_ssize_t]
 ENUM_PROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+SCI_GETCOLUMN = 2129
+SCI_GETLINEENDPOSITION = 2136
+SCI_GETFIRSTVISIBLELINE = 2152
+SCI_POINTXFROMPOSITION = 2164
+SCI_POINTYFROMPOSITION = 2165
+SCI_POSITIONFROMLINE = 2167
+SCI_DOCLINEFROMVISIBLE = 2221
+SCI_TEXTHEIGHT = 2279
+SCI_LINESONSCREEN = 2370
+SCI_GETZOOM = 2374
+
+MIN_SPAN = 20       # shortest line, in characters, that a cell width is read from
+AGREE = 0.02        # lines further than this share from the median width are left out
 
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020   # mouse clicks pass through
@@ -132,6 +156,75 @@ def pane_rect(pane):
     p = wt.POINT(0, 0)
     u32.ClientToScreen(pane, ctypes.byref(p))
     return p.x, p.y, p.x + r.right, p.y + r.bottom
+
+
+def sci(pane, msg, w=0, l=0):
+    return u32.SendMessageW(pane, msg, w, l)
+
+
+def font_state(pane):
+    """What changes when the font or zoom does: cheap enough to ask every poll."""
+    return sci(pane, SCI_TEXTHEIGHT, 0), sci(pane, SCI_GETZOOM)
+
+
+def grid_profile(pane):
+    """
+    The character grid, in pixels from the pane's top-left corner:
+    (advance, line height, text left), or (None, reason).
+
+    The advance is read off the lines on screen: how far across the pane each
+    one's text runs, over how many columns. Every line that is at least
+    MIN_SPAN columns long and fits on one row counts; those that disagree
+    with the rest (wide characters) are dropped, and the rest are pooled, so
+    the answer is good to a few thousandths of a pixel.
+    """
+    line_height = sci(pane, SCI_TEXTHEIGHT, 0)
+    if line_height <= 0:
+        return None, ("the editor did not answer; is Notepad++ running as "
+                      "administrator?")
+
+    first = sci(pane, SCI_GETFIRSTVISIBLELINE)
+    rows = sci(pane, SCI_LINESONSCREEN)
+    top = sci(pane, SCI_DOCLINEFROMVISIBLE, first)
+    bottom = sci(pane, SCI_DOCLINEFROMVISIBLE, first + rows)
+    text_left = sci(pane, SCI_POINTXFROMPOSITION, 0,
+                    sci(pane, SCI_POSITIONFROMLINE, top))
+
+    spans = []
+    for line in range(top, bottom + 1):
+        start = sci(pane, SCI_POSITIONFROMLINE, line)
+        end = sci(pane, SCI_GETLINEENDPOSITION, line)
+        columns = (sci(pane, SCI_GETCOLUMN, end)
+                   - sci(pane, SCI_GETCOLUMN, start))
+        if columns < MIN_SPAN:
+            continue
+        if (sci(pane, SCI_POINTYFROMPOSITION, 0, start)
+                != sci(pane, SCI_POINTYFROMPOSITION, 0, end)):
+            continue                     # wrapped: it runs over two rows
+        width = (sci(pane, SCI_POINTXFROMPOSITION, 0, end)
+                 - sci(pane, SCI_POINTXFROMPOSITION, 0, start))
+        spans.append((width, columns))
+
+    if not spans:
+        return None, ("no line of %d or more characters on one row is on "
+                      "screen; scroll to some longer ones" % MIN_SPAN)
+    each = sorted(w / c for w, c in spans)
+    median = each[len(each) // 2]
+    kept = [(w, c) for w, c in spans if abs(w / c / median - 1) <= AGREE]
+    advance = sum(w for w, _ in kept) / sum(c for _, c in kept)
+    return (advance, line_height, text_left), None
+
+
+def profile_lines(pane, rect):
+    """The profile line, and the reason the cell is missing if it is."""
+    left, top, right, bottom = rect
+    size = "profile: %d x %d" % (right - left, bottom - top)
+    grid, reason = grid_profile(pane)
+    if grid is None:
+        return [size, "cell not read: " + reason]
+    advance, line_height, text_left = grid
+    return ["%s, cell %.3f x %d, text at %d"
+            % (size, advance, line_height, text_left)]
 
 
 # Each corner's window is a white tile, (a + 2m) wide by (a + m) tall, holding
@@ -225,7 +318,7 @@ def main():
     root = tk.Tk()
     root.withdraw()
     markers = Markers(root)
-    last = {"rect": None, "shown": None}
+    last = {"rect": None, "shown": None, "font": None, "profile": None}
 
     def tick():
         if not u32.IsWindow(npp) or not os.path.exists(STATE_FILE):
@@ -251,6 +344,11 @@ def main():
                           "(%d x %d), scale %.2f"
                           % (l, t, r, b, r - l, b - t, scale))
                 last["rect"] = rect
+            font = font_state(pane)
+            if (rect, font) != (last["profile"], last["font"]):
+                for line in profile_lines(pane, rect):
+                    print(line)
+                last["profile"], last["font"] = rect, font
         elif last["shown"] is not False:
             markers.hide()
         last["shown"] = show

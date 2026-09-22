@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { GridProfile } from "../../src/pipeline/profileGrid";
 import type { Point } from "../../src/pipeline/rectify";
 import { loadImage } from "./image";
 
@@ -42,6 +43,12 @@ export interface FixtureMeta {
    * its own, which is what the capture measurements are in.
    */
   paneSize?: { width: number; height: number };
+  /**
+   * The grid as overlay.py printed it beside the pane's size, in screen pixels
+   * from the pane's corner. Only what was actually printed on the machine: a
+   * guessed one would make the metrics measure the guess.
+   */
+  profile?: GridProfile;
   /** Known geometry, when the fixture was generated rather than captured. */
   truth?: {
     cellWidthPx: number;

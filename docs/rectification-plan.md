@@ -2,7 +2,7 @@
 
 A plan, not a record of what was built. It takes the list of ideas that came
 out of getting the corner markers working, checks each against the code as of
-43b2b59, and puts what is left in an order. Steps 1 and 2 are done in code; nothing after them has been implemented.
+43b2b59, and puts what is left in an order. Steps 1-3 are done in code; nothing after them has been implemented.
 
 ## What the photographs say
 
@@ -261,11 +261,29 @@ Each step names the number that should move.
    to do on the phone: see what Safari grants, and whether the density and
    CER move. If it stops at 1080p, the next thing to try is the native camera
    through a file input, which hands over a full-resolution still.
-3. **Screen profile and 2x output.** `overlay.py` prints the Scintilla values;
-   the app takes them beside the pane size; `RECTIFIED_SIZING` becomes source
-   at 2x; the 2% stale-size check; `calibrateCellPitch` shrinks to the
-   verifier. Moves: indent accuracy and CER on the photos, and a large
-   deletion.
+3. **Screen profile and 2x output.** Done, with two changes from the plan.
+   `overlay.py` prints `profile: 985 x 563, cell 10.750 x 23, text at 42`
+   from integer-only Scintilla messages, or the size alone and the reason when
+   the cell cannot be read. The start screen takes that line, or the size
+   alone. A read then falls back to estimating the grid, and says why, when
+   there is no grid in the profile, when the corners were placed by hand, when
+   the camera puts the pane's proportions more than 2% from the profile's (a
+   resized window), or when the text lines up best at a cell width more than
+   3% from it (a changed font or zoom - a point size is about 7%).
+   The changes: **no 2x output** - it took the estimator on the real photos
+   from a median 41% CER to about 100%, so the fixed 1600 width stays, which
+   is still one scale per pane - and **`calibrateCellPitch` stays** as the
+   fallback rather than shrinking to a verifier. And the profile is not laid
+   out rigidly: on the bowed photos that read worse than estimating, because
+   the middle of the pane is squeezed by about 1%. The profile settles which
+   spacing, how many rows and where text starts; the photograph sets the
+   spacing within 3% of it.
+   Measured: the rendered panes read at 0-1.1% CER on the profile path. The
+   real photos have no printed profile yet; with a guessed one (10.75 x 23,
+   text at 42) their median CER was 40.5%, level with estimating (41.4%), and
+   the steadiest captures better (24.5% against 28.8%). Using the known
+   aspect alone took the photos from 47.7% to 41.4%. Next: print the real
+   profile on the machine, add it to the photo sidecars, and re-measure.
 4. **Remove the bow.** Measure the four pane boundaries as curves in each shot
    (top and bottom against the chrome; left from the gutter-to-text boundary
    offset by the known margin width; right against the scrollbar) and warp

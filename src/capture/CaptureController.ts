@@ -3,17 +3,15 @@ import {
   cameraPxPerScreenPx,
   estimatePaneAspect,
   normalizeQuad,
-  rectifyFrame,
-  type OutputSizing,
   type PaneAspect,
   type Point,
 } from "../pipeline/rectify";
-import { loadPaneSize } from "../settings";
+import { loadPaneSize, loadScreenProfile } from "../settings";
 import { VERSION_LABEL } from "../version";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
 import type { Framing } from "../pipeline/margins";
-import { analyzeCapture, RECTIFIED_SIZING } from "../pipeline/analyze";
+import { analyzeCapture, prepareCapture, type KnownGrid } from "../pipeline/analyze";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
 import { rowsToText, type LineRow } from "../model/lineIndex";
 import { drawDebugOverlay } from "./debugOverlay";
@@ -307,7 +305,7 @@ export class CaptureController {
       fromMarkers: this.fromMarkers,
       report: this.report,
       track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
-      paneSize: loadPaneSize(),
+      screen: loadScreenProfile(),
     })
       .catch((error) => {
         this.hint.textContent = `Could not save: ${error instanceof Error ? error.message : String(error)}`;
@@ -426,27 +424,25 @@ export class CaptureController {
   private read(): void {
     const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
     const source = ctx.getImageData(0, 0, this.frame.width, this.frame.height);
-    const known = loadPaneSize();
-    const sizing: OutputSizing =
-      RECTIFIED_SIZING.kind === "source" && known ? { ...RECTIFIED_SIZING, paneSize: known } : RECTIFIED_SIZING;
-
-    const rectified = rectifyFrame(
+    const prepared = prepareCapture(
       source,
       CORNER_ORDER.map((c) => this.points[c]),
-      {
-        sizing,
-        intrinsics: assumedIntrinsics(this.frame.width, this.frame.height),
-        knownAspect: known ? known.width / known.height : undefined,
-      }
+      { facts: loadScreenProfile(), intrinsics: assumedIntrinsics(this.frame.width, this.frame.height) }
     );
-    if (!rectified) {
+    if (!prepared) {
       this.hint.textContent = "Those corners don't make a pane. Drag each one onto a corner of the window, then read.";
       return;
     }
+    const { rectified } = prepared;
 
     const image = new ImageData(rectified.data as Uint8ClampedArray<ArrayBuffer>, rectified.width, rectified.height);
     const note = `frame ${this.frame.width} x ${this.frame.height}, rectified ${rectified.width} x ${rectified.height}, aspect ${rectified.aspect.aspect.toFixed(3)} (${rectified.aspect.method})${rectified.size.clamped ? ", size capped" : ""}`;
-    void this.showResult(image, this.fromMarkers ? "pane" : "window", `${VERSION_LABEL}\n${note}`);
+    void this.showResult(
+      image,
+      this.fromMarkers ? "pane" : "window",
+      [VERSION_LABEL, note, ...prepared.notes].join("\n"),
+      prepared.known
+    );
   }
 
   /** The pane's proportions: as given on the start screen, or else from the corners and the camera. */
@@ -465,7 +461,7 @@ export class CaptureController {
    * drawn on them: the grid and margins go on a transparent canvas laid over
    * the one showing the capture, so looking at the result cannot change it.
    */
-  private async showResult(rectified: ImageData, framing: Framing, note: string): Promise<void> {
+  private async showResult(rectified: ImageData, framing: Framing, note: string, known: KnownGrid | null): Promise<void> {
     this.stop();
 
     this.resultView = document.createElement("div");
@@ -502,7 +498,7 @@ export class CaptureController {
     this.root.appendChild(this.resultView);
 
     const atlas = await loadAtlasAssets();
-    const analysis = analyzeCapture(rectified, framing, atlas);
+    const analysis = analyzeCapture(rectified, framing, atlas, known);
 
     info.textContent = [note, ...analysis.summary].join("\n");
     if (analysis.margins) {
