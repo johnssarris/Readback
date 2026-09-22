@@ -74,6 +74,54 @@ export function findRuns(mask: boolean[]): Array<{ start: number; end: number }>
   return runs;
 }
 
+/**
+ * Softens a grayscale buffer, by two box passes across and two down.
+ *
+ * Two passes rather than one because a single box has corners: it smears a
+ * stroke into a bar with hard ends, where a lens spreads it smoothly. Two are
+ * close enough to a Gaussian for this and cost two more additions per pixel.
+ */
+export function soften(src: Float32Array, width: number, height: number, radius: number): Float32Array {
+  if (radius <= 0) return src;
+
+  let current = src;
+  for (let pass = 0; pass < 2; pass++) {
+    const across = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        let n = 0;
+        for (let d = -radius; d <= radius; d++) {
+          const xx = x + d;
+          if (xx >= 0 && xx < width) {
+            sum += current[y * width + xx];
+            n++;
+          }
+        }
+        across[y * width + x] = sum / n;
+      }
+    }
+
+    const down = new Float32Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let sum = 0;
+        let n = 0;
+        for (let d = -radius; d <= radius; d++) {
+          const yy = y + d;
+          if (yy >= 0 && yy < height) {
+            sum += across[yy * width + x];
+            n++;
+          }
+        }
+        down[y * width + x] = sum / n;
+      }
+    }
+    current = down;
+  }
+  return current;
+}
+
 /** Otsu's method: finds the luminance threshold that best separates `values` into two classes. */
 export function otsuThreshold(values: number[]): number {
   const histogram = new Array(256).fill(0);

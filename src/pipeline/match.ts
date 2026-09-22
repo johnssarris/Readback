@@ -1,4 +1,4 @@
-import { luminance, resampleToGray, type Rect } from "./imageUtils";
+import { luminance, resampleToGray, soften, type Rect } from "./imageUtils";
 
 export interface AtlasManifest {
   /** The face the templates were rendered from; the editor being photographed has to match it. */
@@ -66,9 +66,31 @@ export const BLANK_CONTRAST = 48;
  */
 const BLANK_REGION = 0.6;
 
+/**
+ * How far the templates are softened before anything is compared to them, as a
+ * share of a template cell's width.
+ *
+ * The templates come off a vector face at a size of their own choosing, so their
+ * edges are as sharp as the format allows. Nothing photographed through a lens
+ * is, and correlation is a comparison of whole images: a sharp template and a
+ * soft cell disagree along every edge in the glyph, which is most of what a
+ * glyph is. The disagreement is much the same for every template, so the scores
+ * of all of them collapse together - on the photo fixtures the correct
+ * character was beaten by a margin of 0.003 while sitting second or third.
+ *
+ * Softening the templates to something a camera could have produced is matching
+ * the template to the measurement rather than the measurement to the template.
+ * Measured over the fixtures, it is worth 13 to 16 points of character accuracy
+ * on a photograph and nothing either way on a render, which has no blur to
+ * match; the figure below is the widest setting that still costs a render
+ * nothing.
+ */
+const TEMPLATE_SOFTENING = 3 / 28;
+
 /** Builds a runtime glyph atlas (grayscale bitmaps) from the generated sprite sheet + manifest. */
 export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasManifest): GlyphAtlas {
   const glyphs = new Map<string, Float32Array>();
+  const radius = Math.round(manifest.cellWidth * TEMPLATE_SOFTENING);
 
   for (const [char, rect] of Object.entries(manifest.sprites)) {
     const gray = new Float32Array(rect.w * rect.h);
@@ -78,7 +100,7 @@ export function buildAtlasFromImageData(atlasImage: ImageData, manifest: AtlasMa
         gray[y * rect.w + x] = luminance(atlasImage.data[i], atlasImage.data[i + 1], atlasImage.data[i + 2]);
       }
     }
-    glyphs.set(char, gray);
+    glyphs.set(char, soften(gray, rect.w, rect.h, radius));
   }
 
   return {

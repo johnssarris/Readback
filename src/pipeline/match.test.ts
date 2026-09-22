@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAtlasFromImageData, matchCell, normalizedCrossCorrelation, type AtlasManifest } from "./match";
+import { soften } from "./imageUtils";
 
 const SIZE = 8;
 
@@ -177,5 +178,32 @@ describe("matchCell", () => {
       expect(result.char).toBe(" ");
       expect(result.flagged).toBe(false);
     }
+  });
+});
+
+describe("soften", () => {
+  it("spreads a stroke without moving it or changing its total ink", () => {
+    const w = 9;
+    const h = 9;
+    const src = new Float32Array(w * h).fill(255);
+    for (let y = 0; y < h; y++) src[y * w + 4] = 0; // one dark column down the middle
+
+    const out = soften(src, w, h, 1);
+
+    // The darkest point stays where the stroke was, and its neighbours darken.
+    const row = 4 * w;
+    expect(out[row + 4]).toBeLessThan(out[row + 3]);
+    expect(out[row + 3]).toBeLessThan(out[row + 2]);
+    expect(out[row + 3]).toBeCloseTo(out[row + 5], 5); // symmetric
+
+    // Nothing is created or destroyed: a blur redistributes, it does not darken.
+    const total = (b: Float32Array) => b.reduce((a, v) => a + v, 0);
+    expect(total(out) / total(src)).toBeGreaterThan(0.99);
+    expect(total(out) / total(src)).toBeLessThan(1.01);
+  });
+
+  it("leaves the buffer alone at radius zero", () => {
+    const src = new Float32Array([1, 2, 3, 4]);
+    expect(soften(src, 2, 2, 0)).toBe(src);
   });
 });
