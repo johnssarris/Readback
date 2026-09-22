@@ -1,0 +1,9 @@
+{
+  "note": "Readback capture 2026-09-22 14:10:33, Notepad++ plain view, overlay.py markers. Found in the app at 87cd5f6, thresholds 93 and 107 agreeing. Cropped losslessly to the monitor (y 400-1296 of the 1080x1920 frame). Corners checked by eye against a 5x zoom of each marker.",
+  "corners": [
+    [151.2, 194.3],
+    [959, 251.8],
+    [885.7, 703.4],
+    [177.4, 609.1]
+  ]
+}

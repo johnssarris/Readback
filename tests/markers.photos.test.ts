@@ -67,6 +67,11 @@ describe("markers in photographs", () => {
       const report = inspectMarkers(loadImage(path));
 
       expect(report.outcome).toBe("found");
+      // Not just found by some pair of levels: found by the first one tried.
+      // The ladder is there for shots no single threshold reads, and a clean
+      // photograph that already needs its outer levels is one step from
+      // needing more than there are.
+      expect(report.levels[0].outcome).toBe("found");
       report.quad!.corners.forEach((corner, i) => {
         const [x, y] = corners[i];
         expect(Math.hypot(corner.x - x, corner.y - y)).toBeLessThan(TOLERANCE_PX);
