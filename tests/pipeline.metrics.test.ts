@@ -36,7 +36,14 @@ describe("pipeline metrics", () => {
       if (fixture.meta.kind === "photo" && mode === "camera") continue;
 
       it(`${fixture.name} [${mode}]`, () => {
-        const { metrics, margins, pitch } = runFixture(fixture, mode);
+        const { metrics, margins, pitch, unreadable } = runFixture(fixture, mode);
+
+        // Nothing downstream ran, so there are no numbers to print - only the
+        // reason, which is the whole result for that row.
+        if (unreadable) {
+          rows.push(`${`${fixture.name} [${mode}]`.padEnd(26)} ${unreadable}`);
+          return;
+        }
 
         rows.push(
           [

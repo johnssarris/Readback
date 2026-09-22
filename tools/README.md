@@ -92,8 +92,19 @@ service of finding them again in a photograph:
   covering anything.
 - **`ARM` by `THICK`, at 100% scaling, scaled by the pane's DPI.** The ratio of
   the two decides how much of the L's bounding box is ink — about a third —
-  which is the test that separates a marker from every other dark thing in a
-  frame, and being a ratio it holds at any distance from the screen.
+  and being a ratio it holds at any distance from the screen.
+
+No one of those is what identifies a marker, and the detector does not try to
+judge a blob on its own account. A photographed marker is blurred, compressed
+and thresholded until its arms are thinner than they were drawn, while the
+editor below it is full of crisp glyphs — an L, a J, a 7 — that are better L's
+than it is by every measure a single shape offers. What the four markers have
+that scattered text does not is each other: they are one size, one to a corner,
+around a pane that fills a good part of the shot, and each one's L points the
+way its position says it should. The shape tests above only decide what is
+worth considering; the four are then chosen together, largest first, because
+the markers bound the pane and any four pieces of text that happen to form a
+quad form a smaller one inside it.
 
 `tools/marker-geometry.json` holds `ARM`, `THICK` and `MARGIN`. The fixture
 renderer and the detector both read it. `overlay.py` keeps its own copy, since

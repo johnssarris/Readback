@@ -1,0 +1,24 @@
+  4. Add a hotkey: Run > Run..., enter
+         pythonw "C:\\path\\to\\plain_view.py"
+     then Save... and assign a shortcut.
+
+Use the same font in all three places above - the UDL's Default style, the
+UDL's Number style, and Global Styles > Line number margin - so the text, the
+numbers in the text, and the line numbers all render in one consistent face.
+Cascadia Mono ships with Windows 11.
+
+Notes:
+  - Notepad++ must not be running as administrator. Windows blocks messages
+    from a normal process to an elevated one, and nothing will happen.
+  - In split view the script targets the larger pane. If the panes change
+    between toggling on and off, the saved window is toggled off instead.
+  - Windows display scaling changes how many device pixels a point size
+    renders to, so the same SIZE looks larger or smaller on screen at
+    different scaling. Keep scaling consistent (100% recommended) for a
+    consistent result.
+  - If the original document was itself a UDL, toggling off can't switch
+    back to it. Pick it from the Language menu.
+  - Scintilla message IDs are commented inline. The full list is in the
+    Scintilla documentation (Scintilla.iface).
+"""
+

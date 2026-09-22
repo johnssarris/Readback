@@ -2,11 +2,16 @@
 
 Each fixture is three files sharing a name:
 
-| file          | what it is                                                       |
-| ------------- | ---------------------------------------------------------------- |
-| `<name>.png`  | the image                                                        |
-| `<name>.json` | sidecar: what kind of image it is, and what it shows              |
-| `<name>.txt`  | the ground-truth text (shared between fixtures; named in the json) |
+| file                     | what it is                                                         |
+| ------------------------ | ------------------------------------------------------------------ |
+| `<name>.png` or `.jpg`   | the image                                                          |
+| `<name>.json`            | sidecar: what kind of image it is, and what it shows                |
+| `<name>.txt`             | the ground-truth text (shared between fixtures; named in the json) |
+
+A render is a PNG, because it is drawn rather than captured and nothing should
+be lost between drawing it and measuring it. A photo is kept as the JPEG the
+phone produced: re-encoding it as PNG would preserve every compression artifact
+it already has while costing four times the space.
 
 `tests/pipeline.metrics.test.ts` runs every fixture here through the whole
 pipeline and prints a table. Run it with `npm run metrics`.
@@ -23,7 +28,11 @@ blank-cell segmentation.
 Windows display scaling. This is what the geometry and recognition numbers
 should be read from.
 
-**`photo`** — shot with a phone, as the app actually sees a screen.
+**`photo`** — shot with a phone, as the app actually sees a screen. The three
+`photo-*` fixtures are one Notepad++ window at three distances, plain view on,
+dark chrome, `overlay.py` running. They are the only fixtures here that were
+not made by this repository, and the only ones that can say whether the
+detector works on a real screen rather than a drawing of one.
 
 Two of the renders put the line number margin in another face - Courier Prime
 and Inconsolata, the OFL fonts closest to Courier New and Consolas, which

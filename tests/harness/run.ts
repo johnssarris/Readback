@@ -42,6 +42,8 @@ export interface RunResult {
   rectified: ImageData;
   /** Scale from fixture pixels to rectified pixels, for comparing against truth. */
   scale: { x: number; y: number };
+  /** Why the run produced nothing, when it did; null when the pipeline ran. */
+  unreadable: string | null;
 }
 
 /**
@@ -75,7 +77,11 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   } else if (fixture.meta.corners) {
     corners = fixture.meta.corners;
   } else if (fixture.meta.kind === "photo") {
-    throw new Error(`Fixture ${fixture.name} is a photo with no markers found and no corners in its sidecar`);
+    // A photo with neither is not a broken fixture, it is the detector failing
+    // on it, and that is a result to report rather than an error to throw:
+    // nothing in the image says where the window is, so there is nothing left
+    // to measure, and the table should say so on the row.
+    return unread(fixture, image);
   } else if (mode === "camera") {
     corners = photograph(source, camera).corners;
   } else {
@@ -134,7 +140,37 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
-  return { margins, pitch, metrics, text, rectified, scale: view.scale };
+  return { margins, pitch, metrics, text, rectified, scale: view.scale, unreadable: null };
+}
+
+/**
+ * The result for a fixture the pipeline could not start on, so the table has a
+ * row for it saying why rather than the run stopping at the first one.
+ */
+function unread(fixture: Fixture, image: ImageData): RunResult {
+  return {
+    margins: { bodyTopY: 0, bodyBottomY: 0, gutterRightEdgeX: 0, textAreaLeftX: 0, textAreaRightX: 0, gutterLeftX: 0 },
+    pitch: { widthPx: NaN, heightPx: NaN, columnOriginX: NaN, rowYCenters: [], rowBaselines: [] },
+    metrics: {
+      bodyTopErrorPx: null,
+      bodyBottomErrorPx: null,
+      gutterEdgeErrorPx: null,
+      cellWidthErrorPct: null,
+      cellHeightErrorPct: null,
+      rowsDetected: 0,
+      rowsExpected: fixture.meta.truth?.rowCount ?? fixture.lines.length,
+      rowOffsetCells: null,
+      inkAccuracy: 0,
+      indentAccuracy: 0,
+      cer: null,
+      numberAccuracy: null,
+      markerErrorPx: null,
+    },
+    text: null,
+    rectified: image,
+    scale: { x: 1, y: 1 },
+    unreadable: "no corner markers found",
+  };
 }
 
 function score(
