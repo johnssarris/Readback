@@ -129,68 +129,47 @@ export function warpImageData(
   ];
 
   const forward = computeHomography(srcCorners, dstCorners);
-  const inverse = invertHomography(forward);
+  const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = invertHomography(forward);
+  const src = srcData.data;
 
+  // Inverse mapping, one row at a time: the three homogeneous coordinates are
+  // linear along a row, so each is a running sum rather than a matrix product
+  // per pixel. Samples are bilinear, on pixel centres; outside the frame is black.
   const out = new Uint8ClampedArray(destWidth * destHeight * 4);
   for (let dy = 0; dy < destHeight; dy++) {
-    for (let dx = 0; dx < destWidth; dx++) {
-      const srcPoint = applyHomography(inverse, { x: dx + 0.5, y: dy + 0.5 });
-      const sample = bilinearSample(srcData, sourceWidth, sourceHeight, srcPoint.x, srcPoint.y);
-      const di = (dy * destWidth + dx) * 4;
-      out[di] = sample[0];
-      out[di + 1] = sample[1];
-      out[di + 2] = sample[2];
-      out[di + 3] = sample[3];
+    const py = dy + 0.5;
+    let nx = h0 * 0.5 + h1 * py + h2;
+    let ny = h3 * 0.5 + h4 * py + h5;
+    let nw = h6 * 0.5 + h7 * py + h8;
+    let di = dy * destWidth * 4;
+    for (let dx = 0; dx < destWidth; dx++, nx += h0, ny += h3, nw += h6, di += 4) {
+      const x = nx / nw;
+      const y = ny / nw;
+      if (!(x >= 0 && y >= 0 && x < sourceWidth && y < sourceHeight)) {
+        out[di + 3] = 255;
+        continue;
+      }
+      const x0 = Math.floor(x - 0.5);
+      const y0 = Math.floor(y - 0.5);
+      const fx = x - 0.5 - x0;
+      const fy = y - 0.5 - y0;
+      const cx0 = x0 < 0 ? 0 : x0;
+      const cx1 = x0 + 1 > sourceWidth - 1 ? sourceWidth - 1 : x0 + 1;
+      const cy0 = y0 < 0 ? 0 : y0;
+      const cy1 = y0 + 1 > sourceHeight - 1 ? sourceHeight - 1 : y0 + 1;
+      const i00 = (cy0 * sourceWidth + cx0) * 4;
+      const i10 = (cy0 * sourceWidth + cx1) * 4;
+      const i01 = (cy1 * sourceWidth + cx0) * 4;
+      const i11 = (cy1 * sourceWidth + cx1) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = src[i00 + c] * (1 - fx) + src[i10 + c] * fx;
+        const bottom = src[i01 + c] * (1 - fx) + src[i11 + c] * fx;
+        out[di + c] = top * (1 - fy) + bottom * fy;
+      }
     }
   }
 
   return { width: destWidth, height: destHeight, data: out };
-}
-
-function bilinearSample(
-  data: ImageData,
-  width: number,
-  height: number,
-  x: number,
-  y: number
-): [number, number, number, number] {
-  if (x < 0 || y < 0 || x >= width || y >= height) {
-    return [0, 0, 0, 255];
-  }
-
-  const x0 = Math.floor(x - 0.5);
-  const y0 = Math.floor(y - 0.5);
-  const x1 = x0 + 1;
-  const y1 = y0 + 1;
-  const fx = x - 0.5 - x0;
-  const fy = y - 0.5 - y0;
-
-  const cx0 = clamp(x0, 0, width - 1);
-  const cx1 = clamp(x1, 0, width - 1);
-  const cy0 = clamp(y0, 0, height - 1);
-  const cy1 = clamp(y1, 0, height - 1);
-
-  const p00 = pixelAt(data, width, cx0, cy0);
-  const p10 = pixelAt(data, width, cx1, cy0);
-  const p01 = pixelAt(data, width, cx0, cy1);
-  const p11 = pixelAt(data, width, cx1, cy1);
-
-  const result: [number, number, number, number] = [0, 0, 0, 0];
-  for (let c = 0; c < 4; c++) {
-    const top = p00[c] * (1 - fx) + p10[c] * fx;
-    const bottom = p01[c] * (1 - fx) + p11[c] * fx;
-    result[c] = top * (1 - fy) + bottom * fy;
-  }
-  return result;
-}
-
-function pixelAt(data: ImageData, width: number, x: number, y: number): [number, number, number, number] {
-  const i = (y * width + x) * 4;
-  return [data.data[i], data.data[i + 1], data.data[i + 2], data.data[i + 3]];
-}
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
 }
 
 export type Quad = [Point, Point, Point, Point];
@@ -250,8 +229,11 @@ function isClockwiseConvex(quad: Point[]): boolean {
  * rectangle seen from another. Knowing the camera settles it. Assumed here:
  * square pixels, no skew, the optical centre at the middle of the frame the
  * camera produced, and a focal length of FOCAL_FRACTION of that frame's long
- * side. The answer is not sensitive to the focal length: on the real captures,
- * anything from 800 to 1500 px on a 1920 frame moves it by under 1%.
+ * side. How much the answer leans on the focal length grows with how steeply
+ * the pane is seen. At the angles the real captures were taken from, anything
+ * from 800 to 1500 px on a 1920 frame moves it by about 1%; a pane seen 20-30
+ * degrees off square, with the lens 30% off, can be a few percent out - still
+ * about half the error of averaging the edges (tests/rectify.geometry.test.ts).
  */
 export interface Intrinsics {
   focalPx: number;
@@ -352,4 +334,79 @@ export function estimateAspectRatio(corners: Point[]): number {
 
 function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * How big to make the rectified image.
+ *
+ * `fixed` is a set width, the height following from the aspect - what every
+ * capture used to get, at 1600. `source` follows the photograph instead: the
+ * longer of each pair of opposite edges, so no row or column of the pane is
+ * squeezed into fewer pixels than the camera gave it, times `oversample`. With
+ * the pane's own size known (overlay.py prints it), `source` is that size
+ * times `oversample` instead, so every capture of a pane lays its character
+ * cells out at the same size whatever distance it was taken from.
+ */
+export type OutputSizing =
+  | { kind: "fixed"; width: number }
+  | { kind: "source"; oversample: number; paneSize?: { width: number; height: number } };
+
+/** Bounds on the rectified image, so a still from a 12 MP camera cannot run a phone out of memory. */
+export const MAX_OUTPUT_WIDTH = 2400;
+export const MAX_OUTPUT_PIXELS = 4_000_000;
+
+export interface OutputSize {
+  width: number;
+  height: number;
+  /** Whether the bounds above cut it down from what was asked for. */
+  clamped: boolean;
+}
+
+export function chooseOutputSize(corners: Point[], aspect: number, sizing: OutputSizing): OutputSize {
+  let width: number;
+  if (sizing.kind === "fixed") {
+    width = sizing.width;
+  } else if (sizing.paneSize) {
+    width = sizing.paneSize.width * sizing.oversample;
+  } else {
+    const [tl, tr, br, bl] = corners;
+    const across = Math.max(distance(tl, tr), distance(bl, br));
+    const down = Math.max(distance(tl, bl), distance(tr, br));
+    width = Math.max(across, down * aspect) * sizing.oversample;
+  }
+
+  const limit = Math.min(MAX_OUTPUT_WIDTH, Math.sqrt(MAX_OUTPUT_PIXELS * aspect));
+  const clamped = width > limit;
+  if (clamped) width = limit;
+
+  const w = Math.max(1, Math.round(width));
+  return { width: w, height: Math.max(1, Math.round(w / aspect)), clamped };
+}
+
+export interface Rectified {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+  corners: Quad;
+  aspect: PaneAspect;
+  size: OutputSize;
+}
+
+/**
+ * The pane, flattened: corners put in order, proportions recovered, size
+ * chosen, then one warp from the photograph. The app and the metrics harness
+ * both go through here, so what is measured is what the app reads.
+ */
+export function rectifyFrame(
+  image: ImageData,
+  corners: Point[],
+  options: { sizing: OutputSizing; intrinsics?: Intrinsics; knownAspect?: number }
+): Rectified | null {
+  const quad = normalizeQuad(corners);
+  if (!quad) return null;
+
+  const aspect = estimatePaneAspect(quad, { intrinsics: options.intrinsics, knownAspect: options.knownAspect });
+  const size = chooseOutputSize(quad, aspect.aspect, options.sizing);
+  const warped = warpImageData(image, image.width, image.height, quad, size.width, size.height);
+  return { ...warped, corners: quad, aspect, size };
 }

@@ -1,7 +1,14 @@
 import { calibrateCellPitch, type CellPitch } from "./calibrate";
 import { detectMargins, type Framing, type MarginBounds } from "./margins";
 import type { GlyphAtlas } from "./match";
+import type { OutputSizing } from "./rectify";
 import { buildRows, type LineRow } from "../model/lineIndex";
+
+/**
+ * How big every capture is rectified to, in the app and in the metrics run
+ * alike. See OutputSizing.
+ */
+export const RECTIFIED_SIZING: OutputSizing = { kind: "fixed", width: 1600 };
 
 export interface Analysis {
   margins: MarginBounds | null;

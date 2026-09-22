@@ -54,9 +54,9 @@ const DEFAULT_BASELINE_FRACTION = 0.8;
  * never had.
  */
 function cellRect(x: number, rowTop: number, pitch: CellPitch, margins: MarginBounds): Rect {
-  const top = Math.max(Math.round(rowTop), Math.ceil(margins.bodyTopY));
-  const bottom = Math.min(Math.round(rowTop + pitch.heightPx), Math.floor(margins.bodyBottomY));
-  return { x: Math.round(x), y: top, w: Math.round(pitch.widthPx), h: Math.max(1, bottom - top) };
+  const top = Math.max(rowTop, margins.bodyTopY);
+  const bottom = Math.min(rowTop + pitch.heightPx, margins.bodyBottomY);
+  return { x, y: top, w: pitch.widthPx, h: Math.max(1, bottom - top) };
 }
 
 function cellResultFromMatch(rect: Rect, match: ReturnType<typeof matchCell>): CellResult {

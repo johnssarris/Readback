@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { applyHomography, computeHomography, estimateAspectRatio, invertHomography, normalizeQuad, type Point } from "./rectify";
+import {
+  applyHomography,
+  chooseOutputSize,
+  computeHomography,
+  estimateAspectRatio,
+  invertHomography,
+  MAX_OUTPUT_PIXELS,
+  MAX_OUTPUT_WIDTH,
+  normalizeQuad,
+  type Point,
+} from "./rectify";
 
 function expectPointClose(a: Point, b: Point, precision = 6) {
   expect(a.x).toBeCloseTo(b.x, precision);
@@ -148,5 +158,52 @@ describe("normalizeQuad", () => {
     expect(normalizeQuad([tl, { x: 500, y: 100 }, tr, br])).toBeNull(); // three nearly in a line
     expect(normalizeQuad([tl, tr, br, { x: 500, y: 300 }])).toBeNull(); // one inside the other three
     expect(normalizeQuad([tl, tl, br, bl])).toBeNull(); // two the same
+  });
+});
+
+describe("chooseOutputSize", () => {
+  // A pane photographed 900 across at the top and 820 at the bottom, 500 and
+  // 480 down its sides.
+  const quad = [
+    { x: 100, y: 100 },
+    { x: 1000, y: 100 },
+    { x: 960, y: 580 },
+    { x: 140, y: 600 },
+  ];
+  const across = 900;
+
+  it("keeps the old fixed width when asked to", () => {
+    expect(chooseOutputSize(quad, 1.75, { kind: "fixed", width: 1600 })).toEqual({ width: 1600, height: 914, clamped: false });
+  });
+
+  it("follows the longer edge of the photograph, so no row is squeezed", () => {
+    const size = chooseOutputSize(quad, 1.75, { kind: "source", oversample: 1 });
+    expect(size.width).toBe(across);
+    expect(size.height).toBe(Math.round(across / 1.75));
+    expect(chooseOutputSize(quad, 1.75, { kind: "source", oversample: 1.5 }).width).toBe(across * 1.5);
+  });
+
+  it("follows the longer side instead when the aspect makes that the bigger pane", () => {
+    // The right side, 40 across and 520 down, at 2.0 wide-to-high is about
+    // 1043 across - more than the 900 seen.
+    const tall = [quad[0], quad[1], { x: 960, y: 620 }, { x: 140, y: 620 }];
+    expect(chooseOutputSize(tall, 2, { kind: "source", oversample: 1 }).width).toBe(Math.round(Math.hypot(40, 520) * 2));
+  });
+
+  it("lays a known pane out at its own size, wherever it was photographed from", () => {
+    const size = chooseOutputSize(quad, 985 / 563, { kind: "source", oversample: 1.5, paneSize: { width: 985, height: 563 } });
+    expect(size).toEqual({ width: 1478, height: 845, clamped: false });
+  });
+
+  it("caps the size a phone has to hold", () => {
+    const wide = chooseOutputSize(quad, 1.75, { kind: "source", oversample: 10 });
+    expect(wide.clamped).toBe(true);
+    expect(wide.width).toBeLessThanOrEqual(MAX_OUTPUT_WIDTH);
+    expect(wide.width * wide.height).toBeLessThanOrEqual(MAX_OUTPUT_PIXELS * 1.001);
+
+    const tall = chooseOutputSize(quad, 0.5, { kind: "source", oversample: 10 });
+    expect(tall.clamped).toBe(true);
+    expect(tall.width * tall.height).toBeLessThanOrEqual(MAX_OUTPUT_PIXELS * 1.001);
+    expect(Math.abs(tall.width / tall.height - 0.5)).toBeLessThan(0.01);
   });
 });

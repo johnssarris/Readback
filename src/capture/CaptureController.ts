@@ -2,7 +2,8 @@ import {
   assumedIntrinsics,
   estimatePaneAspect,
   normalizeQuad,
-  warpImageData,
+  rectifyFrame,
+  type OutputSizing,
   type PaneAspect,
   type Point,
 } from "../pipeline/rectify";
@@ -10,7 +11,7 @@ import { loadPaneSize } from "../settings";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
 import type { Framing } from "../pipeline/margins";
-import { analyzeCapture } from "../pipeline/analyze";
+import { analyzeCapture, RECTIFIED_SIZING } from "../pipeline/analyze";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
 import { rowsToText, type LineRow } from "../model/lineIndex";
 import { drawDebugOverlay } from "./debugOverlay";
@@ -376,21 +377,29 @@ export class CaptureController {
   }
 
   private read(): void {
-    const srcCorners = normalizeQuad(CORNER_ORDER.map((c) => this.points[c]));
-    if (!srcCorners) {
+    const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
+    const source = ctx.getImageData(0, 0, this.frame.width, this.frame.height);
+    const known = loadPaneSize();
+    const sizing: OutputSizing =
+      RECTIFIED_SIZING.kind === "source" && known ? { ...RECTIFIED_SIZING, paneSize: known } : RECTIFIED_SIZING;
+
+    const rectified = rectifyFrame(
+      source,
+      CORNER_ORDER.map((c) => this.points[c]),
+      {
+        sizing,
+        intrinsics: assumedIntrinsics(this.frame.width, this.frame.height),
+        knownAspect: known ? known.width / known.height : undefined,
+      }
+    );
+    if (!rectified) {
       this.hint.textContent = "Those corners don't make a pane. Drag each one onto a corner of the window, then read.";
       return;
     }
-    const { aspect } = this.paneAspect(srcCorners);
 
-    const destWidth = 1600;
-    const destHeight = Math.round(destWidth / aspect);
-
-    const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
-    const source = ctx.getImageData(0, 0, this.frame.width, this.frame.height);
-    const warped = warpImageData(source, source.width, source.height, srcCorners, destWidth, destHeight);
-    const rectified = new ImageData(warped.data as Uint8ClampedArray<ArrayBuffer>, warped.width, warped.height);
-    void this.showResult(rectified, this.fromMarkers ? "pane" : "window");
+    const image = new ImageData(rectified.data as Uint8ClampedArray<ArrayBuffer>, rectified.width, rectified.height);
+    const note = `rectified ${rectified.width} x ${rectified.height}, aspect ${rectified.aspect.aspect.toFixed(3)} (${rectified.aspect.method})${rectified.size.clamped ? ", size capped" : ""}`;
+    void this.showResult(image, this.fromMarkers ? "pane" : "window", note);
   }
 
   /** The pane's proportions: as given on the start screen, or else from the corners and the camera. */
@@ -409,7 +418,7 @@ export class CaptureController {
    * drawn on them: the grid and margins go on a transparent canvas laid over
    * the one showing the capture, so looking at the result cannot change it.
    */
-  private async showResult(rectified: ImageData, framing: Framing): Promise<void> {
+  private async showResult(rectified: ImageData, framing: Framing, note: string): Promise<void> {
     this.stop();
 
     this.resultView = document.createElement("div");
@@ -448,7 +457,7 @@ export class CaptureController {
     const atlas = await loadAtlasAssets();
     const analysis = analyzeCapture(rectified, framing, atlas);
 
-    info.textContent = analysis.summary.join("\n");
+    info.textContent = [note, ...analysis.summary].join("\n");
     if (analysis.margins) {
       drawDebugOverlay(overlay.getContext("2d")!, rectified, analysis.margins, analysis.pitch);
     }

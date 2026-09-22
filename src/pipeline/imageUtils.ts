@@ -207,22 +207,40 @@ export interface Rect {
   h: number;
 }
 
-/** Crops `rect` out of `image` and resamples it (grayscale, bilinear) to destWidth x destHeight. */
+/**
+ * Resamples `rect` of `image` (grayscale, bilinear) to destWidth x destHeight.
+ *
+ * The rect can fall between pixels: a cell is wherever the calibrated pitch
+ * puts it, and rounding it to whole pixels makes each cell up to half a pixel
+ * the wrong width - a few percent of a small cell. Samples stay inside the
+ * rect, so a neighbour's ink cannot bleed in at its edge.
+ */
 export function resampleToGray(image: ImageData, rect: Rect, destWidth: number, destHeight: number): Float32Array {
-  const srcGray = new Float32Array(rect.w * rect.h);
-  for (let y = 0; y < rect.h; y++) {
-    for (let x = 0; x < rect.w; x++) {
-      const i = ((rect.y + y) * image.width + (rect.x + x)) * 4;
-      srcGray[y * rect.w + x] = luminance(image.data[i], image.data[i + 1], image.data[i + 2]);
-    }
-  }
+  const { width, height, data } = image;
+  const lum = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    return luminance(data[i], data[i + 1], data[i + 2]);
+  };
+
+  const minX = rect.x + 0.5;
+  const maxX = rect.x + rect.w - 0.5;
+  const minY = rect.y + 0.5;
+  const maxY = rect.y + rect.h - 0.5;
 
   const dest = new Float32Array(destWidth * destHeight);
   for (let dy = 0; dy < destHeight; dy++) {
+    const sy = Math.min(maxY, Math.max(minY, rect.y + ((dy + 0.5) * rect.h) / destHeight));
+    const y0 = Math.max(0, Math.min(height - 1, Math.floor(sy - 0.5)));
+    const y1 = Math.min(height - 1, y0 + 1);
+    const fy = Math.max(0, Math.min(1, sy - 0.5 - y0));
     for (let dx = 0; dx < destWidth; dx++) {
-      const sx = ((dx + 0.5) * rect.w) / destWidth;
-      const sy = ((dy + 0.5) * rect.h) / destHeight;
-      dest[dy * destWidth + dx] = bilinearGraySample(srcGray, rect.w, rect.h, sx, sy);
+      const sx = Math.min(maxX, Math.max(minX, rect.x + ((dx + 0.5) * rect.w) / destWidth));
+      const x0 = Math.max(0, Math.min(width - 1, Math.floor(sx - 0.5)));
+      const x1 = Math.min(width - 1, x0 + 1);
+      const fx = Math.max(0, Math.min(1, sx - 0.5 - x0));
+      const top = lum(x0, y0) * (1 - fx) + lum(x1, y0) * fx;
+      const bottom = lum(x0, y1) * (1 - fx) + lum(x1, y1) * fx;
+      dest[dy * destWidth + dx] = top * (1 - fy) + bottom * fy;
     }
   }
   return dest;
