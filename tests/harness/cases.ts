@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Point } from "../../src/pipeline/rectify";
-import { loadPng } from "./image";
+import { loadImage } from "./image";
 
 export const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -56,7 +56,10 @@ export interface Fixture {
   rows: string[];
 }
 
-/** Every fixture in tests/fixtures: a .png plus a .json sidecar naming its ground-truth text. */
+/** The image formats a fixture can be stored in; see `loadImage`. */
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
+
+/** Every fixture in tests/fixtures: an image plus a .json sidecar naming its ground-truth text. */
 export function loadFixtures(): Fixture[] {
   if (!existsSync(FIXTURE_DIR)) return [];
 
@@ -66,9 +69,9 @@ export function loadFixtures(): Fixture[] {
     .map((file) => {
       const name = file.replace(/\.json$/, "");
       const meta: FixtureMeta = JSON.parse(readFileSync(join(FIXTURE_DIR, file), "utf8"));
-      const png = join(FIXTURE_DIR, `${name}.png`);
-      if (!existsSync(png)) {
-        throw new Error(`Fixture ${name}.json has no ${name}.png beside it`);
+      const image = IMAGE_EXTENSIONS.map((ext) => join(FIXTURE_DIR, name + ext)).find(existsSync);
+      if (!image) {
+        throw new Error(`Fixture ${name}.json has no ${name}${IMAGE_EXTENSIONS.join("/")} beside it`);
       }
       const text = readFileSync(join(FIXTURE_DIR, meta.text), "utf8").replace(/\n$/, "");
 
@@ -77,6 +80,6 @@ export function loadFixtures(): Fixture[] {
       // rather than charged as errors.
       const all = text.split("\n");
       const lines = all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
-      return { name, meta, image: loadPng(png), lines, rows: meta.truth?.displayRows ?? lines };
+      return { name, meta, image: loadImage(image), lines, rows: meta.truth?.displayRows ?? lines };
     });
 }
