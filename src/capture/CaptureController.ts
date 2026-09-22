@@ -8,6 +8,7 @@ import {
   type Point,
 } from "../pipeline/rectify";
 import { loadPaneSize } from "../settings";
+import { VERSION_LABEL } from "../version";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
 import type { Framing } from "../pipeline/margins";
@@ -399,7 +400,7 @@ export class CaptureController {
 
     const image = new ImageData(rectified.data as Uint8ClampedArray<ArrayBuffer>, rectified.width, rectified.height);
     const note = `rectified ${rectified.width} x ${rectified.height}, aspect ${rectified.aspect.aspect.toFixed(3)} (${rectified.aspect.method})${rectified.size.clamped ? ", size capped" : ""}`;
-    void this.showResult(image, this.fromMarkers ? "pane" : "window", note);
+    void this.showResult(image, this.fromMarkers ? "pane" : "window", `${VERSION_LABEL}\n${note}`);
   }
 
   /** The pane's proportions: as given on the start screen, or else from the corners and the camera. */
