@@ -1,5 +1,6 @@
 import { estimateAspectRatio, warpPerspective, type Point } from "../pipeline/rectify";
-import { detectMarkerQuad } from "../pipeline/markers";
+import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
+import { saveCapture } from "./saveCapture";
 import { detectMargins, type Framing, type MarginBounds } from "../pipeline/margins";
 import { calibrateCellPitch, type CellPitch } from "../pipeline/calibrate";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
@@ -38,12 +39,16 @@ export class CaptureController {
   private freezeBtn: HTMLButtonElement;
   private readBtn: HTMLButtonElement;
   private retakeBtn: HTMLButtonElement;
+  private saveBtn: HTMLButtonElement;
   private resultView: HTMLDivElement | null = null;
 
   private phase: Phase = "live";
 
   /** Whether the corners on screen came from the markers or from nowhere. */
   private fromMarkers = false;
+
+  /** What the detector made of the frozen frame, for the hint and for saving. */
+  private report: MarkerReport | null = null;
 
   /** Corner positions in frozen-frame pixels, which is what the warp needs. */
   private points: Record<Corner, Point> = {
@@ -105,10 +110,11 @@ export class CaptureController {
     this.freezeBtn = button("Freeze", "shutter-btn", () => this.freeze());
     this.readBtn = button("Read", "shutter-btn", () => this.read());
     this.retakeBtn = button("Retake", "shutter-btn secondary", () => this.retake());
+    this.saveBtn = button("Save", "shutter-btn secondary", () => this.save());
 
     const controls = document.createElement("div");
     controls.className = "capture-controls";
-    controls.append(this.freezeBtn, this.retakeBtn, this.readBtn);
+    controls.append(this.freezeBtn, this.retakeBtn, this.saveBtn, this.readBtn);
 
     this.stage.append(this.video, this.frame, this.overlay, this.loupe);
     this.root.append(this.hint, this.stage, controls);
@@ -145,14 +151,41 @@ export class CaptureController {
     this.freezeBtn.hidden = adjusting;
     this.readBtn.hidden = !adjusting;
     this.retakeBtn.hidden = !adjusting;
+    this.saveBtn.hidden = !adjusting;
     this.loupe.hidden = true;
 
     if (!adjusting) {
       this.hint.textContent = "Fill the frame with the window, hold steady, then freeze";
     } else if (this.fromMarkers) {
-      this.hint.textContent = "Corners found. Nudge any that look wrong, then read";
+      this.hint.textContent = `Corners found. Nudge any that look wrong, then read — ${this.verdict()}`;
     } else {
-      this.hint.textContent = "No corner markers found. Drag each corner onto the pane";
+      this.hint.textContent = `No corner markers found. Drag each corner onto the pane — ${this.verdict()}`;
+    }
+  }
+
+  /**
+   * The detector's own account of the frame, in a line.
+   *
+   * A saved capture carries the full report, but the answer to "why didn't it
+   * find them this time" is usually one number - how many marker-shaped things
+   * were in the frame and how they fell across the four corners - and it is
+   * worth having without unzipping anything.
+   */
+  private verdict(): string {
+    const report = this.report;
+    if (!report) return "no reading";
+
+    const counts = CORNER_ORDER.map((corner) => report.candidates[corner]);
+    const total = counts.reduce((a, b) => a + b, 0);
+    switch (report.outcome) {
+      case "found":
+        return `${total} marker-shaped, ${report.ms}ms`;
+      case "no-candidates":
+        return `nothing marker-shaped in ${report.blobs} dark shapes`;
+      case "corners-missing":
+        return `${total} marker-shaped, none facing ${CORNER_ORDER.filter((c) => report.candidates[c] === 0).join("/")}`;
+      case "no-plausible-quad":
+        return `${total} marker-shaped, no four of them a pane (${report.quadsTried} tried)`;
     }
   }
 
@@ -169,7 +202,8 @@ export class CaptureController {
 
     // The markers, if they are in the shot, know where the pane is better than
     // a fingertip does. Failing that, a box to drag into place.
-    const quad = detectMarkerQuad(ctx.getImageData(0, 0, width, height));
+    this.report = inspectMarkers(ctx.getImageData(0, 0, width, height));
+    const quad = this.report.quad;
     this.fromMarkers = quad !== null;
 
     if (quad) {
@@ -192,6 +226,37 @@ export class CaptureController {
 
   private retake(): void {
     this.setPhase("live");
+  }
+
+  /**
+   * Saves the frozen frame and everything known about it, as a fixture.
+   *
+   * The capture that goes wrong is the one nobody can reproduce: it happened on
+   * a phone, against a screen, in a room none of the test images came from. So
+   * the frame leaves with the corners it was read at and the detector's account
+   * of it, in the layout tests/fixtures uses, ready to become a permanent case.
+   */
+  private save(): void {
+    if (this.phase !== "adjust" || !this.report) return;
+
+    const label = this.saveBtn.textContent;
+    this.saveBtn.disabled = true;
+    this.saveBtn.textContent = "Saving…";
+
+    saveCapture({
+      frame: this.frame,
+      corners: this.points,
+      fromMarkers: this.fromMarkers,
+      report: this.report,
+      track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
+    })
+      .catch((error) => {
+        this.hint.textContent = `Could not save: ${error instanceof Error ? error.message : String(error)}`;
+      })
+      .finally(() => {
+        this.saveBtn.disabled = false;
+        this.saveBtn.textContent = label;
+      });
   }
 
   /**
