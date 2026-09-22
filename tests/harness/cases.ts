@@ -36,6 +36,12 @@ export interface FixtureMeta {
    * cropped down from a capture has to say where the crop was.
    */
   frame?: { width: number; height: number; cropX: number; cropY: number };
+  /**
+   * The pane's size on screen, in pixels, as overlay.py printed it. With the
+   * corners it says how many screen pixels the camera spread over how many of
+   * its own, which is what the capture measurements are in.
+   */
+  paneSize?: { width: number; height: number };
   /** Known geometry, when the fixture was generated rather than captured. */
   truth?: {
     cellWidthPx: number;
@@ -72,27 +78,49 @@ export interface Fixture {
 /** The image formats a fixture can be stored in; see `loadImage`. */
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
 
-/** Every fixture in tests/fixtures: an image plus a .json sidecar naming its ground-truth text. */
+/**
+ * Every fixture in tests/fixtures: an image plus a .json sidecar naming its
+ * ground-truth text. The marker captures in markers/ join them once their
+ * sidecars name the text they show; until then they are the marker detector's
+ * alone.
+ */
 export function loadFixtures(): Fixture[] {
   if (!existsSync(FIXTURE_DIR)) return [];
 
-  return readdirSync(FIXTURE_DIR)
+  const markers = join(FIXTURE_DIR, "markers");
+  const withText = existsSync(markers)
+    ? sidecars("markers").filter((file) => JSON.parse(readFileSync(join(FIXTURE_DIR, file), "utf8")).text)
+    : [];
+  return [...sidecars(""), ...withText].map(loadFixture);
+}
+
+/** The .json files in a directory under tests/fixtures, as paths relative to it. */
+function sidecars(dir: string): string[] {
+  return readdirSync(join(FIXTURE_DIR, dir))
     .filter((f) => f.endsWith(".json"))
     .sort()
-    .map((file) => {
-      const name = file.replace(/\.json$/, "");
-      const meta: FixtureMeta = JSON.parse(readFileSync(join(FIXTURE_DIR, file), "utf8"));
-      const image = IMAGE_EXTENSIONS.map((ext) => join(FIXTURE_DIR, name + ext)).find(existsSync);
-      if (!image) {
-        throw new Error(`Fixture ${name}.json has no ${name}${IMAGE_EXTENSIONS.join("/")} beside it`);
-      }
-      const text = readFileSync(join(FIXTURE_DIR, meta.text), "utf8").replace(/\n$/, "");
+    .map((f) => (dir ? `${dir}/${f}` : f));
+}
 
-      // Only what the window actually shows can be recognized from it, so a
-      // source file longer than the screenful is truncated to what is on screen
-      // rather than charged as errors.
-      const all = text.split("\n");
-      const lines = all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
-      return { name, meta, image: loadImage(image), lines, rows: meta.truth?.displayRows ?? lines };
-    });
+function loadFixture(file: string): Fixture {
+  const name = file.replace(/\.json$/, "");
+  const meta: FixtureMeta = JSON.parse(readFileSync(join(FIXTURE_DIR, file), "utf8"));
+  // Written by hand as [x, y] pairs, as tests/fixtures/README.md shows them.
+  if (meta.corners) meta.corners = meta.corners.map(toPoint) as FixtureMeta["corners"];
+  const image = IMAGE_EXTENSIONS.map((ext) => join(FIXTURE_DIR, name + ext)).find(existsSync);
+  if (!image) {
+    throw new Error(`Fixture ${name}.json has no ${name}${IMAGE_EXTENSIONS.join("/")} beside it`);
+  }
+  const text = readFileSync(join(FIXTURE_DIR, meta.text), "utf8").replace(/\n$/, "");
+
+  // Only what the window actually shows can be recognized from it, so a
+  // source file longer than the screenful is truncated to what is on screen
+  // rather than charged as errors.
+  const all = text.split("\n");
+  const lines = all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
+  return { name, meta, image: loadImage(image), lines, rows: meta.truth?.displayRows ?? lines };
+}
+
+function toPoint(p: Point | [number, number]): Point {
+  return Array.isArray(p) ? { x: p[0], y: p[1] } : p;
 }

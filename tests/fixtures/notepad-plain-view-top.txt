@@ -1,0 +1,24 @@
+What "on" does:
+  - switches the document to a User Defined Language that supplies the font
+  - forces every style to black on white, no bold/italic/underline, fixed size
+  - gives the line number margin a light grey background, so there's a clear
+    edge between the line numbers and the text
+  - switches font rendering to grayscale antialiasing, so text edges are
+    plain grey rather than ClearType's coloured fringes
+  - hides the caret, current-line highlight, and change-history markers
+  - hides the bookmark, fold, and change-history margins (keeps line numbers)
+  - resets zoom, turns off whitespace symbols, EOL markers, indent guides,
+    and the edge line
+  - turns on word wrap, so nothing runs off the right edge (WRAP below)
+
+What "off" does:
+  - switches back to the original language, which makes Notepad++ reapply
+    the normal theme, then restores every other setting it changed
+
+One-time setup:
+  1. In Notepad++: Language > User Defined Language > Define your language...
+     Create new, name it exactly as UDL_NAME below. Leave Ext. empty.
+     Folder & Default tab > Default style > Styler: font Cascadia Mono,
+     size as SIZE below, black on white, bold/italic/underline unchecked.
+     Comment & Number tab > Number style > Styler: same settings.
+     Restart Notepad++.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { CaptureMeasures } from "./harness/capture";
 import { loadFixtures } from "./harness/cases";
 import { loadAtlas, runFixture, type Mode } from "./harness/run";
 
@@ -19,6 +20,16 @@ const TIMEOUT_MS = 120_000;
 function fmt(value: number | null, digits = 1, suffix = ""): string {
   if (value === null || Number.isNaN(value)) return "-";
   return value.toFixed(digits) + suffix;
+}
+
+/** Camera px per screen px, blur and the boundaries' bow, all in screen pixels; see measureCapture. */
+function capture(measures: CaptureMeasures | null): string {
+  if (!measures) return "capture n/a";
+  const bow = (v: number | null) => (v === null ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}`);
+  return (
+    `dens ${measures.density.toFixed(2)} blur ${fmt(measures.blurPx, 1)} ` +
+    `bow ${bow(measures.bowPx.top)}/${bow(measures.bowPx.bottom)}`
+  );
 }
 
 describe("pipeline metrics", () => {
@@ -58,6 +69,8 @@ describe("pipeline metrics", () => {
             `cer ${metrics.cer === null ? "n/a" : fmt(metrics.cer * 100, 2, "%")}`.padEnd(13),
             `num ${metrics.numberAccuracy === null ? "n/a" : fmt(metrics.numberAccuracy * 100, 1, "%")}`.padEnd(12),
             `marker ${metrics.markerErrorPx === null ? "n/a" : fmt(metrics.markerErrorPx, 2, "px")}`.padEnd(15),
+            `wander ${fmt(metrics.columnWanderCells, 2)}`.padEnd(12),
+            capture(metrics.capture).padEnd(38),
             warp ? `out ${warp.width}x${warp.height} ${warp.aspect.toFixed(3)} ${warp.method} ${warp.ms.toFixed(0)}ms` : "",
           ].join(" ")
         );

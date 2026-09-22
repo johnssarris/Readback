@@ -362,6 +362,23 @@ export interface OutputSize {
   clamped: boolean;
 }
 
+/**
+ * Camera pixels per screen pixel, over the pane: how finely the shot sampled
+ * what was on screen. Below 1 the camera took fewer samples than the screen
+ * has pixels, and a glyph's strokes - a pixel or two wide - fall between them.
+ * The square root of the ratio of areas, so a pane seen at an angle counts its
+ * near and far halves together.
+ */
+export function cameraPxPerScreenPx(corners: Point[], pane: { width: number; height: number }): number {
+  let twice = 0;
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    twice += a.x * b.y - b.x * a.y;
+  }
+  return Math.sqrt(Math.abs(twice) / 2 / (pane.width * pane.height));
+}
+
 export function chooseOutputSize(corners: Point[], aspect: number, sizing: OutputSizing): OutputSize {
   let width: number;
   if (sizing.kind === "fixed") {

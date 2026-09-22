@@ -1,5 +1,6 @@
 import {
   assumedIntrinsics,
+  cameraPxPerScreenPx,
   estimatePaneAspect,
   normalizeQuad,
   rectifyFrame,
@@ -18,6 +19,18 @@ import { rowsToText, type LineRow } from "../model/lineIndex";
 import { drawDebugOverlay } from "./debugOverlay";
 
 const MARGIN_FRACTION = 0.12;
+
+/**
+ * The frame asked of the camera: 4K, the most a phone's browser offers.
+ *
+ * At 1080p a pane filling the shot got fewer camera pixels than it has screen
+ * pixels - 0.77 to 0.97 of one per screen pixel across the saved captures -
+ * while a glyph's strokes are one or two screen pixels wide. It is asked for as
+ * ideal, not exact: a camera that cannot do it hands over the nearest it can,
+ * and what it actually gave is shown after freezing and kept with a saved
+ * capture.
+ */
+const REQUESTED_FRAME = { width: 3840, height: 2160 };
 
 /** Side of the loupe, and how much it magnifies. */
 const LOUPE_SIZE = 132;
@@ -136,7 +149,11 @@ export class CaptureController {
 
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: REQUESTED_FRAME.width },
+        height: { ideal: REQUESTED_FRAME.height },
+      },
       audio: false,
     });
     this.video.srcObject = this.stream;
@@ -168,10 +185,25 @@ export class CaptureController {
     if (!adjusting) {
       this.hint.textContent = "Fill the frame with the window, hold steady, then freeze";
     } else if (this.fromMarkers) {
-      this.hint.textContent = `Corners found. Nudge any that look wrong, then read — ${this.verdict()}`;
+      this.hint.textContent = `Corners found. Nudge any that look wrong, then read — ${this.verdict()} · ${this.sampling()}`;
     } else {
-      this.hint.textContent = `No corner markers found. Drag each corner onto the pane — ${this.verdict()}`;
+      this.hint.textContent = `No corner markers found. Drag each corner onto the pane — ${this.verdict()} · ${this.sampling()}`;
     }
+  }
+
+  /**
+   * What the camera actually gave, and what that came to on the pane.
+   *
+   * The frame is whatever the camera settled on, which need not be what was
+   * asked for; with the pane's size known, the corners also say how many
+   * camera pixels each screen pixel got - below 1, fewer than the screen has.
+   */
+  private sampling(): string {
+    const frame = `${this.frame.width}×${this.frame.height}`;
+    const pane = loadPaneSize();
+    if (!pane || !this.fromMarkers) return frame;
+    const density = cameraPxPerScreenPx(CORNER_ORDER.map((c) => this.points[c]), pane);
+    return `${frame}, ${density.toFixed(2)} camera px per screen px`;
   }
 
   /**
@@ -200,16 +232,29 @@ export class CaptureController {
     }
   }
 
-  /** Takes the still everything from here on refers to. */
-  private freeze(): void {
+  /**
+   * Takes the still everything from here on refers to.
+   *
+   * The still is shown at once and the markers looked for after, since at 4K
+   * looking takes long enough that a preview still moving would look like a
+   * shutter that had not fired.
+   */
+  private async freeze(): Promise<void> {
     const width = this.video.videoWidth;
     const height = this.video.videoHeight;
-    if (width === 0 || height === 0) return;
+    if (width === 0 || height === 0 || this.freezeBtn.disabled) return;
 
     this.frame.width = width;
     this.frame.height = height;
     const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
     ctx.drawImage(this.video, 0, 0);
+
+    this.video.hidden = true;
+    this.frame.hidden = false;
+    this.freezeBtn.disabled = true;
+    this.hint.textContent = "Looking for the corner markers…";
+    await nextPaint();
+    this.freezeBtn.disabled = false;
 
     // The markers, if they are in the shot, know where the pane is better than
     // a fingertip does. Failing that, a box to drag into place.
@@ -262,6 +307,7 @@ export class CaptureController {
       fromMarkers: this.fromMarkers,
       report: this.report,
       track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
+      paneSize: loadPaneSize(),
     })
       .catch((error) => {
         this.hint.textContent = `Could not save: ${error instanceof Error ? error.message : String(error)}`;
@@ -399,7 +445,7 @@ export class CaptureController {
     }
 
     const image = new ImageData(rectified.data as Uint8ClampedArray<ArrayBuffer>, rectified.width, rectified.height);
-    const note = `rectified ${rectified.width} x ${rectified.height}, aspect ${rectified.aspect.aspect.toFixed(3)} (${rectified.aspect.method})${rectified.size.clamped ? ", size capped" : ""}`;
+    const note = `frame ${this.frame.width} x ${this.frame.height}, rectified ${rectified.width} x ${rectified.height}, aspect ${rectified.aspect.aspect.toFixed(3)} (${rectified.aspect.method})${rectified.size.clamped ? ", size capped" : ""}`;
     void this.showResult(image, this.fromMarkers ? "pane" : "window", `${VERSION_LABEL}\n${note}`);
   }
 
@@ -513,6 +559,11 @@ function button(label: string, className: string, onClick: () => void): HTMLButt
   el.textContent = label;
   el.addEventListener("click", onClick);
   return el;
+}
+
+/** Resolves once the browser has painted what was just put on screen. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 function clamp(v: number, lo: number, hi: number): number {

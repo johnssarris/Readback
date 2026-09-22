@@ -1,6 +1,7 @@
 import { luminance } from "../../src/pipeline/imageUtils";
 import type { MarginBounds } from "../../src/pipeline/margins";
 import type { CellPitch } from "../../src/pipeline/calibrate";
+import type { CaptureMeasures } from "./capture";
 
 /**
  * Metrics for a pipeline run against a fixture.
@@ -31,6 +32,10 @@ export interface Metrics {
   numberAccuracy: number | null;
   /** Mean distance from each detected pane corner to where the markers were drawn. */
   markerErrorPx: number | null;
+  /** Spread of the column grid's best phase across the line, in cells; see columnWander. */
+  columnWanderCells: number | null;
+  /** The capture as a photograph, when its markers were found and its pane's size is known; see measureCapture. */
+  capture: CaptureMeasures | null;
 }
 
 /**
@@ -142,6 +147,95 @@ export function inkMap(
   }
   return map;
 }
+
+/** Stretches of the text area the column grid is checked in, left to right. */
+const WANDER_SPANS = 6;
+
+/**
+ * How far the column grid wanders from the text across the line, in cells.
+ *
+ * The grid is one width and one origin for the whole pane. In each sixth of the
+ * text area, the phase that puts the cell boundaries in the gaps between
+ * characters is found on its own, and what is returned is how far apart those
+ * phases are. A grid that fits the whole line scores zero; one that is simply
+ * offset scores zero too, and shows in indent instead.
+ *
+ * Two things score above zero, and this does not tell them apart: a rectified
+ * image that is not evenly scaled from side to side, which is what a bowed
+ * capture gives, and a cell width a little off, which slides the grid steadily
+ * across the line. The simulated camera is a pure perspective view, so what it
+ * scores is the second.
+ */
+export function columnWander(image: ImageData, margins: MarginBounds, pitch: CellPitch): number | null {
+  const width = pitch.widthPx;
+  if (!(width > 0)) return null;
+  const x0 = Math.max(0, Math.round(pitch.columnOriginX));
+  const x1 = Math.min(image.width, Math.round(margins.textAreaRightX));
+  const y0 = Math.max(0, Math.round(margins.bodyTopY));
+  const y1 = Math.min(image.height, Math.round(margins.bodyBottomY));
+  if (x1 - x0 < width * WANDER_SPANS * 4 || y1 <= y0) return null;
+
+  // Darkness summed down each column: continuous rather than thresholded, so
+  // it does not depend on where a threshold happens to fall in a photograph.
+  const profile = new Float64Array(x1 - x0);
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * image.width + x) * 4;
+      profile[x - x0] += 255 - luminance(image.data[i], image.data[i + 1], image.data[i + 2]);
+    }
+  }
+  const sample = (x: number) => {
+    const i = Math.floor(x);
+    if (i < 0 || i + 1 >= profile.length) return profile[Math.max(0, Math.min(profile.length - 1, i))];
+    const f = x - i;
+    return profile[i] * (1 - f) + profile[i + 1] * f;
+  };
+
+  const offset = pitch.columnOriginX - x0;
+  const spans: Array<{ shift: number; ink: number }> = [];
+  for (let span = 0; span < WANDER_SPANS; span++) {
+    const from = ((x1 - x0) * span) / WANDER_SPANS;
+    const to = ((x1 - x0) * (span + 1)) / WANDER_SPANS;
+    let total = 0;
+    for (let x = Math.floor(from); x < to; x++) total += profile[x];
+
+    let best = 0;
+    let least = Infinity;
+    for (let shift = 0; shift < 1; shift += 0.02) {
+      let ink = 0;
+      let count = 0;
+      const first = Math.ceil((from - offset) / width - shift);
+      for (let k = first; offset + (k + shift) * width < to; k++) {
+        ink += sample(offset + (k + shift) * width);
+        count++;
+      }
+      if (count > 0 && ink / count < least) {
+        least = ink / count;
+        best = shift;
+      }
+    }
+    spans.push({ shift: best, ink: total });
+  }
+
+  // A stretch with little text in it - the short ends of lines - has no gaps
+  // worth the name, and its best phase is wherever the noise put it.
+  const most = Math.max(...spans.map((s) => s.ink));
+  const shifts = spans
+    .filter((s) => s.ink >= most * WANDER_MIN_INK)
+    .map((s) => s.shift)
+    .sort((a, b) => a - b);
+  if (shifts.length < 2) return null;
+
+  // Phase is circular: a boundary a hair either side of a cell edge is the
+  // same boundary. The spread is the shortest arc holding every phase, which is
+  // a whole cell less the widest gap between neighbours round the circle.
+  let widest = shifts[0] + 1 - shifts[shifts.length - 1];
+  for (let i = 1; i < shifts.length; i++) widest = Math.max(widest, shifts[i] - shifts[i - 1]);
+  return 1 - widest;
+}
+
+/** A stretch needs this share of the inkiest one's ink for its phase to count. */
+const WANDER_MIN_INK = 0.3;
 
 /** Fraction of cells whose ink/blank call matches the ground-truth text. */
 export function inkAccuracy(map: boolean[][], lines: string[]): number {

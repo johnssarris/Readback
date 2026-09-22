@@ -1,4 +1,6 @@
 {
+  "kind": "photo",
+  "text": "notepad-plain-view-top.txt",
   "note": "Readback capture 2026-09-22 14:08:40, Notepad++ plain view, overlay.py markers. Found in the app at 87cd5f6, thresholds 84 and 121 agreeing, after 96 and 109 had both rejected the real top-right marker. Cropped losslessly to the monitor (y 400-1296 of the 1080x1920 frame). Corners checked by eye against a 5x zoom of each marker.",
   "corners": [
     [43.3, 214.5],

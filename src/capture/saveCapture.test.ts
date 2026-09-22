@@ -81,4 +81,14 @@ describe("sidecar", () => {
     const meta = JSON.parse(sidecar(record({ fromMarkers: false }), "x")) as { diagnostics: any };
     expect(meta.diagnostics.cornersFrom).toBe("hand");
   });
+
+  // The capture measurements are in screen pixels, so a capture saved with
+  // the pane's size is measured as soon as it is dropped in, unedited.
+  it("carries the pane's size when it was given, and leaves it out when not", () => {
+    const given = JSON.parse(sidecar(record({ paneSize: { width: 985, height: 563 } }), "x")) as FixtureMeta;
+    expect(given.paneSize).toEqual({ width: 985, height: 563 });
+
+    const absent = JSON.parse(sidecar(record(), "x")) as FixtureMeta;
+    expect(absent).not.toHaveProperty("paneSize");
+  });
 });

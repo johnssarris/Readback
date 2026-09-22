@@ -2,7 +2,7 @@
 
 A plan, not a record of what was built. It takes the list of ideas that came
 out of getting the corner markers working, checks each against the code as of
-43b2b59, and puts what is left in an order. Nothing here has been implemented.
+43b2b59, and puts what is left in an order. Steps 1 and 2 are done in code; nothing after them has been implemented.
 
 ## What the photographs say
 
@@ -15,15 +15,16 @@ measurements were throwaway scripts; step 1 below makes them permanent.
 | pane aspect from the corners through the assumed camera    | within 0.9% on all fourteen            |
 | camera px per screen px, app video frames (1080p)          | **0.73 - 0.98**                        |
 | camera px per screen px, the three stills                  | 1.2 - 1.6                              |
-| marker edge, 10-90% rise, in screen px                     | video 3 - 5, stills 1.7 - 3.2          |
+| marker inner edge, 10-90% rise, in screen px (sharp = 0.8) | video 1.3 - 2.7, stills 1.4 - 1.9      |
 | marker arm thickness at the 50% level (drawn 8)            | 5.9 - 7.5                              |
-| pane top/bottom boundary vs the line between its corners   | **2 - 3 screen px off at mid-edge**    |
+| pane top/bottom boundary vs the line between its corners   | **1 - 4 screen px off at mid-edge**    |
 | column grid phase, left to right across the pane (stills)  | wanders +-0.10 - 0.15 cell, S-shaped   |
 | row pitch from `calibrateCellPitch`                        | 22.72 - 22.90 px (likely 23 exactly)   |
 | cell width from `calibrateCellPitch`                       | 10.75 px - fractional, and not the 10.94 that 14 pt Cascadia Mono predicts |
 | `calibrateCellPitch` on a 1:1 rectification of photo-near  | fails: locks onto 16.0 px              |
 | marker detection time                                      | ~100 ms on 1080 x 944, ~210 ms on a 1080p frame, ~490 ms on a 5 MP still (desktop Node) |
-| `npm run metrics`, photos                                  | rows 24/24, ink 94-95%, indent 29-81%, CER 29-46% |
+| `npm run metrics`, stills                                  | rows 24/24, ink 94-95%, indent 29-81%, CER 29-46% |
+| `npm run metrics`, video captures in `markers/`            | CER 28-99%                             |
 
 Three conclusions carry the rest of this document.
 
@@ -32,10 +33,14 @@ plausible corner error. Work that sharpens the corners further buys nothing
 until the bow is gone.
 
 **The frame is.** The app reads a 1080p video frame, which puts fewer camera
-pixels on the pane than the pane has screen pixels, blurred over 3-5 of them,
-against glyph strokes one or two pixels wide. The stills do better on both
+pixels on the pane than the pane has screen pixels, blurred over about two of
+them, against glyph strokes one or two pixels wide. The stills do better on both
 counts and still come out at 29-46% CER, so resolution is necessary, not
 sufficient.
+
+(The first rough blur figures, 3-5 px on video, were read across the arm edge
+that faces the pane, where the first line of text sits a few pixels away. The
+harness reads the inner edges, which face clear white, and gets 1.3-2.7.)
 
 **The moire is baked in at capture.** The rings in every photo are the sensor
 sampling the screen's pixel grid. Nothing done to the pixels after that can
@@ -64,7 +69,7 @@ write. What it does not correct, largest first by what was measured:
   pane sits wholly above the centre (140953, 141014) both bow outward, which
   neither pincushion nor barrel about the centre produces. Hence the plan below
   measures the boundaries rather than assuming a model.
-- **Blur**, defocus and motion together: 1.7-5 screen px.
+- **Blur**, defocus and motion together: 1.3-2.7 screen px.
 - **Moire and JPEG compression.**
 - **The tone curve.**
 - **Rolling shutter.** Its shear is close to affine and mostly absorbed by the
@@ -190,7 +195,7 @@ the pane's own top and bottom boundaries, dark chrome against white page, are
 already full-length straight edges in every capture, and the boundary between
 the grey gutter and the white text is a full-height vertical one. Worth it as a
 **data channel**, and cheaper than it looks: the homography predicts each
-block's centre, so no clock or sync pattern is needed. At 3-5 px of blur a
+block's centre, so no clock or sync pattern is needed. At up to 3 px of blur a
 block wants to be about 10 screen px, which leaves room for about 80 per strip.
 They need their own white tile, clear of the marker tiles so they never join a
 marker's blob, and the marker photo gate re-run once they exist. Better than
@@ -237,13 +242,25 @@ copy checked by the existing drift test, and its rationale into
 
 Each step names the number that should move.
 
-1. **Measure first.** Give the `markers/` captures ground-truth text. Add
-   harness columns for camera px per screen px, marker blur, the mid-edge
-   deviation of each pane boundary, and column-phase wander across the pane.
-   Nothing else can be judged without these.
+1. **Measure first.** Done: the `markers/` captures have their text and are in
+   the metrics run, and the table has `dens`, `blur`, `bow` and `wander`
+   (`tests/fixtures/README.md`). Only the top and bottom boundaries are read
+   for bow; the left and right have no reliable contrast with what is beside
+   them. What the first run showed: across the eleven video captures, blur
+   does not predict CER (1.3 px and 75%, 1.9 px and 30%), but wander does -
+   every capture with wander 0.44 or more is at 75-99% CER, every one at 0.30
+   or less is at 28-57%. The grid is what fails first.
 2. **Resolution.** Ask `getUserMedia` for 4K, and confirm with Save what the
    phone actually delivers. The biggest single lever, and upstream of
    everything else. Moves: camera px per screen px, blur, CER.
+   In the app: it asks for 3840 x 2160, shows after freezing the frame it got
+   and, with the pane size given, the camera px per screen px; a saved capture
+   carries the pane size so it is measured unedited. The detector finds all
+   eleven video captures at twice their size, at the first threshold, within
+   about a pixel of before, in ~0.9 s for a full 4K frame on a desktop. Still
+   to do on the phone: see what Safari grants, and whether the density and
+   CER move. If it stops at 1080p, the next thing to try is the native camera
+   through a file input, which hands over a full-resolution still.
 3. **Screen profile and 2x output.** `overlay.py` prints the Scintilla values;
    the app takes them beside the pane size; `RECTIFIED_SIZING` becomes source
    at 2x; the 2% stale-size check; `calibrateCellPitch` shrinks to the

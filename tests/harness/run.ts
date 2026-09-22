@@ -20,8 +20,10 @@ import { RECTIFIED_SIZING } from "../../src/pipeline/analyze";
 import { photograph, type CameraOptions } from "./degrade";
 import type { Fixture } from "./cases";
 import { makeImageData } from "./image";
+import { measureCapture } from "./capture";
 import {
   characterErrorRate,
+  columnWander,
   inkAccuracy,
   indentAccuracy,
   inkMap,
@@ -150,6 +152,9 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   };
   const metrics = score(fixture, rectified, margins, pitch, view);
 
+  const paneSize = fixture.meta.paneSize ?? (pane ? { width: pane.right - pane.left, height: pane.bottom - pane.top } : null);
+  if (markers && paneSize) metrics.capture = measureCapture(image, markers.corners, paneSize);
+
   if (markers && pane) {
     const want: Point[] = [
       { x: pane.left, y: pane.top },
@@ -199,6 +204,8 @@ function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunRe
       cer: null,
       numberAccuracy: null,
       markerErrorPx: null,
+      columnWanderCells: null,
+      capture: null,
     },
     text: null,
     rectified: image,
@@ -257,6 +264,8 @@ function score(
     cer: null,
     numberAccuracy: null,
     markerErrorPx: null,
+    columnWanderCells: columnWander(rectified, margins, pitch),
+    capture: null,
   };
 }
 
