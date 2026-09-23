@@ -1,0 +1,16 @@
+{
+  "kind": "photo",
+  "text": "screen-test.txt",
+  "lines": [1, 13],
+  "note": "Readback capture 2026-09-23 11:21:29, laptop, Notepad++ plain view at 150% display scaling, overlay.py markers and label, 4K frame from the app at 04e6c1a. In the app the detector said found in 4290 ms, grid estimated (no profile entered). Cropped losslessly to the monitor (y 704-2256 of the 2160x3840 frame). Corners checked by eye against a 4x zoom of each marker. paneSize, profile, lines and scaling read off the overlay's label.",
+  "corners": [
+    [101.5, 188.5],
+    [2081.2, 208.3],
+    [2029.7, 1374.5],
+    [129.6, 1359]
+  ],
+  "frame": { "width": 2160, "height": 3840, "cropX": 0, "cropY": 704 },
+  "paneSize": { "width": 1177, "height": 699 },
+  "profile": { "advance": 16.216, "lineHeight": 34, "textLeft": 56 },
+  "scaling": 1.5
+}

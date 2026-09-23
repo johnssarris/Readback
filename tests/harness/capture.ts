@@ -12,8 +12,9 @@ import { applyHomography, cameraPxPerScreenPx, computeHomography, type Point } f
  * compared with what was drawn. None of this changes what the pipeline does;
  * it is here so a change to the capture can be judged by more than its CER.
  *
- * The marker geometry is taken at 100% display scaling, which is what the
- * captures were made at (tools/README.md).
+ * The markers are drawn at their 100% size times the display scaling, rounded
+ * as overlay.py rounds them, so the scaling the capture was taken at is needed
+ * to know where their edges are.
  */
 export interface CaptureMeasures {
   /** Camera pixels per screen pixel, averaged over the pane's area. */
@@ -29,7 +30,12 @@ export interface CaptureMeasures {
   bowPx: { top: number | null; bottom: number | null };
 }
 
-export function measureCapture(image: ImageData, corners: Point[], pane: { width: number; height: number }): CaptureMeasures {
+export function measureCapture(
+  image: ImageData,
+  corners: Point[],
+  pane: { width: number; height: number },
+  scaling = 1
+): CaptureMeasures {
   const { width: W, height: H } = pane;
   const toImage = computeHomography(
     [
@@ -50,10 +56,11 @@ export function measureCapture(image: ImageData, corners: Point[], pane: { width
     return bilinearGraySample(gray, image.width, image.height, p.x, p.y);
   };
 
+  const marker = { arm: Math.max(4, Math.round(ARM * scaling)), thick: Math.max(2, Math.round(THICK * scaling)) };
   return {
     density: cameraPxPerScreenPx(corners, pane),
-    blurPx: markerBlur(at, W, H),
-    bowPx: { top: boundaryBow(at, W, 0, 1), bottom: boundaryBow(at, W, H, -1) },
+    blurPx: markerBlur(at, W, H, marker),
+    bowPx: { top: boundaryBow(at, W, 0, 1, marker), bottom: boundaryBow(at, W, H, -1, marker) },
   };
 }
 
@@ -75,7 +82,12 @@ const ARM_CLEARANCE = 4;
  * tile's margin, and the pane side has the first line of text a few pixels
  * off. Both inner edges are read, so blur along either axis shows.
  */
-function markerBlur(at: (x: number, y: number) => number, W: number, H: number): number | null {
+interface Marker {
+  arm: number;
+  thick: number;
+}
+
+function markerBlur(at: (x: number, y: number) => number, W: number, H: number, { arm, thick }: Marker): number | null {
   const rises: number[] = [];
   for (const [cx, cy, sx, sy] of [
     [0, 0, 1, -1],
@@ -83,10 +95,10 @@ function markerBlur(at: (x: number, y: number) => number, W: number, H: number):
     [W, H, -1, 1],
     [0, H, 1, 1],
   ]) {
-    for (let t = THICK + ARM_CLEARANCE; t <= ARM - ARM_CLEARANCE; t += 2) {
+    for (let t = thick + ARM_CLEARANCE; t <= arm - ARM_CLEARANCE; t += 2) {
       // Across the horizontal arm's inner edge, then the upright arm's.
-      const horizontal = riseAcross((s) => at(cx + sx * t, cy + sy * s));
-      const upright = riseAcross((s) => at(cx + sx * s, cy + sy * t));
+      const horizontal = riseAcross((s) => at(cx + sx * t, cy + sy * s), thick);
+      const upright = riseAcross((s) => at(cx + sx * s, cy + sy * t), thick);
       if (horizontal !== null) rises.push(horizontal);
       if (upright !== null) rises.push(upright);
     }
@@ -99,9 +111,9 @@ function markerBlur(at: (x: number, y: number) => number, W: number, H: number):
  * its inner edge into the white. `sample(s)` is the brightness s screen pixels
  * out from the arm's outer edge.
  */
-function riseAcross(sample: (s: number) => number): number | null {
-  const from = THICK / 2;
-  const to = THICK + WHITE_REACH;
+function riseAcross(sample: (s: number) => number, thick: number): number | null {
+  const from = thick / 2;
+  const to = thick + WHITE_REACH;
   const values: number[] = [];
   for (let s = from; s <= to; s += PROFILE_STEP) values.push(sample(s));
 
@@ -146,8 +158,14 @@ const BOUNDARY_OUTLIER_PX = 1.5;
  * far the middle is from the line between the ends. The stretches under the
  * markers are left out: there the boundary is the marker's own edge.
  */
-function boundaryBow(at: (x: number, y: number) => number, W: number, y: number, inward: number): number | null {
-  const clear = ARM + 10;
+function boundaryBow(
+  at: (x: number, y: number) => number,
+  W: number,
+  y: number,
+  inward: number,
+  { arm }: Marker
+): number | null {
+  const clear = arm + 10;
   const points: Array<{ u: number; d: number }> = [];
   for (let x = clear; x <= W - clear; x += BOUNDARY_STEP) {
     const values: number[] = [];

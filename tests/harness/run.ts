@@ -181,7 +181,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   };
   const metrics = score(fixture, rectified, margins, pitch, view);
 
-  if (markers && facts) metrics.capture = measureCapture(image, markers.corners, facts.pane);
+  if (markers && facts) metrics.capture = measureCapture(image, markers.corners, facts.pane, fixture.meta.scaling);
 
   if (markers && pane) {
     const want: Point[] = [
@@ -203,7 +203,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     text = rowsToText(rows);
     metrics.cer = characterErrorRate(text, fixture.lines.join("\n"));
 
-    const expected = fixture.meta.truth?.rowNumbers;
+    const expected = fixture.rowNumbers;
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
@@ -236,7 +236,7 @@ function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunRe
       cellWidthErrorPct: null,
       cellHeightErrorPct: null,
       rowsDetected: 0,
-      rowsExpected: fixture.meta.truth?.rowCount ?? fixture.lines.length,
+      rowsExpected: fixture.meta.truth?.rowCount ?? fixture.rows.length,
       rowOffsetCells: null,
       inkAccuracy: 0,
       indentAccuracy: 0,
@@ -296,7 +296,7 @@ function score(
     cellWidthErrorPct: truth ? pct(pitch.widthPx, truth.cellWidthPx * scale.x) : null,
     cellHeightErrorPct: truth ? pct(pitch.heightPx, truth.cellHeightPx * scale.y) : null,
     rowsDetected: pitch.rowYCenters.length,
-    rowsExpected: truth?.rowCount ?? fixture.lines.length,
+    rowsExpected: truth?.rowCount ?? fixture.rows.length,
     rowOffsetCells,
     // Scored against the rows as displayed: with wrap on, a display row is a
     // piece of a line, and the grid is what these two measure.
