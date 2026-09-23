@@ -36,6 +36,8 @@ export interface Metrics {
   columnWanderCells: number | null;
   /** The capture as a photograph, when its markers were found and its pane's size is known; see measureCapture. */
   capture: CaptureMeasures | null;
+  /** Where the read went wrong, when there was a read; see errorBreakdown. */
+  errors: ErrorBreakdown | null;
 }
 
 /**
@@ -272,4 +274,81 @@ export function indentAccuracy(map: boolean[][], lines: string[]): number {
     if (detected === line.length - line.trimStart().length) correct++;
   }
   return total === 0 ? 0 : correct / total;
+}
+
+/** Wrong cells out of all, as a pair, for a share of the pane or a kind of character. */
+export type Tally = [wrong: number, total: number];
+
+/**
+ * Where on the pane, and on what, a read went wrong.
+ *
+ * Every cell of every row is compared with the character the truth has in
+ * that column - the grid is fixed, so no alignment is needed - and the wrong
+ * ones counted three ways. Across and down the pane, over the cells that should
+ * hold a character: errors that grow toward the right or the bottom are the
+ * grid drifting off the text, which is geometry. By what the character is:
+ * errors that stay level across the pane but pile up on one kind of character
+ * are the matching, which is recognition. And the two ways a cell can be wrong
+ * about whether it holds anything at all.
+ */
+export interface ErrorBreakdown {
+  /** Left, middle and right thirds of the text area; cells that should hold a character. */
+  across: [Tally, Tally, Tally];
+  /** Top, middle and bottom thirds of the rows; the same cells. */
+  down: [Tally, Tally, Tally];
+  byClass: { letter: Tally; digit: Tally; punct: Tally; blank: Tally };
+  /** Cells that should hold a character and were read as blank. */
+  inkToBlank: Tally;
+  /** Cells that should be blank and were read as a character. */
+  blankToInk: Tally;
+}
+
+export function errorBreakdown(rows: Array<{ cells: Array<{ char: string }> }>, truth: string[]): ErrorBreakdown {
+  const tally = (): Tally => [0, 0];
+  const out: ErrorBreakdown = {
+    across: [tally(), tally(), tally()],
+    down: [tally(), tally(), tally()],
+    byClass: { letter: tally(), digit: tally(), punct: tally(), blank: tally() },
+    inkToBlank: tally(),
+    blankToInk: tally(),
+  };
+  const count = (t: Tally, wrong: boolean) => {
+    t[1]++;
+    if (wrong) t[0]++;
+  };
+
+  const n = Math.min(rows.length, truth.length);
+  for (let r = 0; r < n; r++) {
+    const cells = rows[r].cells;
+    for (let c = 0; c < cells.length; c++) {
+      const want = truth[r][c] ?? " ";
+      const got = cells[c].char === "" ? " " : cells[c].char;
+      const wrong = got !== want;
+      if (want === " ") {
+        count(out.byClass.blank, wrong);
+        count(out.blankToInk, got !== " ");
+        continue;
+      }
+      count(out.across[Math.min(2, Math.floor((3 * c) / cells.length))], wrong);
+      count(out.down[Math.min(2, Math.floor((3 * r) / n))], wrong);
+      count(out.byClass[/[A-Za-z]/.test(want) ? "letter" : /\d/.test(want) ? "digit" : "punct"], wrong);
+      count(out.inkToBlank, got === " ");
+    }
+  }
+  return out;
+}
+
+/** Adds one breakdown's counts into another's. */
+export function addBreakdown(into: ErrorBreakdown, from: ErrorBreakdown): void {
+  const add = (a: Tally, b: Tally) => {
+    a[0] += b[0];
+    a[1] += b[1];
+  };
+  for (let i = 0; i < 3; i++) {
+    add(into.across[i], from.across[i]);
+    add(into.down[i], from.down[i]);
+  }
+  for (const k of ["letter", "digit", "punct", "blank"] as const) add(into.byClass[k], from.byClass[k]);
+  add(into.inkToBlank, from.inkToBlank);
+  add(into.blankToInk, from.blankToInk);
 }

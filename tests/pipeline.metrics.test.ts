@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CaptureMeasures } from "./harness/capture";
 import { loadFixtures } from "./harness/cases";
 import { loadAtlas, runFixture, type Mode } from "./harness/run";
+import { addBreakdown, errorBreakdown, type ErrorBreakdown, type Tally } from "./harness/metrics";
 
 /**
  * The measurement run: every fixture through the whole pipeline, flat and
@@ -32,6 +33,20 @@ function capture(measures: CaptureMeasures | null): string {
   );
 }
 
+/** A share as a whole percentage, or "-" when there was nothing to count. */
+function pct(t: Tally): string {
+  return t[1] === 0 ? "-" : `${Math.round((100 * t[0]) / t[1])}%`;
+}
+
+/** Where a read went wrong, in a line; see errorBreakdown. */
+function breakdown(e: ErrorBreakdown): string {
+  return (
+    `errors across ${e.across.map(pct).join("/")}  down ${e.down.map(pct).join("/")}  ` +
+    `letter ${pct(e.byClass.letter)} digit ${pct(e.byClass.digit)} punct ${pct(e.byClass.punct)}  ` +
+    `ink>blank ${pct(e.inkToBlank)} blank>ink ${pct(e.blankToInk)}`
+  );
+}
+
 describe("pipeline metrics", () => {
   if (fixtures.length === 0) {
     it.skip("no fixtures in tests/fixtures", () => {});
@@ -39,6 +54,10 @@ describe("pipeline metrics", () => {
   }
 
   const rows: string[] = [];
+  // The photos read against a screen profile, together: one shot's breakdown
+  // is a handful of cells in each bin, a set of them says which way it leans.
+  const photoErrors = errorBreakdown([], []);
+  let photosCounted = 0;
 
   for (const fixture of fixtures) {
     for (const mode of MODES) {
@@ -78,6 +97,11 @@ describe("pipeline metrics", () => {
         // Why the screen profile was not used, when it was not: a row whose
         // grid was estimated in spite of a profile is worth knowing about.
         for (const note of notes) rows.push(`${"".padEnd(26)} ${note}`);
+        if (metrics.errors && fixture.meta.kind === "photo" && fixture.rowNumbers) {
+          rows.push(`${"".padEnd(26)} ${breakdown(metrics.errors)}`);
+          addBreakdown(photoErrors, metrics.errors);
+          photosCounted++;
+        }
 
         // Sanity only: the run produced a grid at all.
         expect(margins.gutterRightEdgeX).toBeGreaterThan(0);
@@ -95,6 +119,7 @@ describe("pipeline metrics", () => {
         "pipeline metrics".toUpperCase(),
         ...rows,
         "",
+        photosCounted > 0 ? `${photosCounted} photos with screen profiles, together: ${breakdown(photoErrors)}` : "",
         atlas ? "atlas: loaded from public/atlas/" : "atlas: none built - cer not measured",
         kinds.has("render")
           ? "note: 'render' fixtures are Chromium stand-ins - geometry numbers only, not valid for atlas comparison"

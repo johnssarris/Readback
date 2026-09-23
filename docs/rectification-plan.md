@@ -296,6 +296,20 @@ Each step names the number that should move.
    and the recognized text shows why: it is right at the left and top and
    drifts off toward the right and bottom, where these shots bow by up to
    5 px. That is step 4's to fix, and it is next.
+   Second profile session (captures 123507-123619, the profile entered in the
+   app): 41-74% CER. Where the errors are, from the harness's new breakdown
+   (errorBreakdown, one line per photo in the metrics table): 46% of the cells
+   that should hold a character are wrong, rising from about 35% in the left
+   third of the line to 60% in the right, and letters, digits and punctuation
+   all well into double figures - not a matching problem with one kind of
+   character. Drawn on the rectified image, the rows sit right and the column
+   boundaries slide off the text by a fifth of a cell within twenty columns.
+   The matcher reads each cell exactly where the grid puts it, and that is
+   enough to read a neighbour's halves. Letting each cell move up to 0.3 of a
+   cell sideways takes the wrong cells from 46% to 22%, and 0.1 of a row up or
+   down as well to 17%. So about two thirds of what is wrong is the grid not
+   sitting on the text - geometry - and what recognition itself gets wrong is
+   the remaining sixth or so.
 4. **Remove the bow.** Measure the four pane boundaries as curves in each shot
    (top and bottom against the chrome; left from the gutter-to-text boundary
    offset by the known margin width; right against the scrollbar) and warp

@@ -1,0 +1,28 @@
+{
+  "kind": "photo",
+  "text": "screen-test.txt",
+  "lines": [1, 13],
+  "note": "Readback capture 2026-09-23 12:35:23, laptop, Notepad++ plain view at 150% display scaling, overlay.py markers and label, 4K frame from the app at 491e4e5 with the profile entered. In the app the detector said found in 377 ms and the grid came from the profile; what the app read is under diagnostics.read. Cropped losslessly to the monitor (y 1200-2688 of the 2160x3840 frame). Corners checked by eye against a 3x zoom of each marker. lines and scaling read off the overlay's label.",
+  "corners": [
+    [195.3, 178.6],
+    [2050.5, 189.6],
+    [2044.8, 1269.1],
+    [210.6, 1308.2]
+  ],
+  "frame": { "width": 2160, "height": 3840, "cropX": 0, "cropY": 1200 },
+  "paneSize": { "width": 1177, "height": 699 },
+  "profile": { "advance": 16.216, "lineHeight": 34, "textLeft": 56 },
+  "scaling": 1.5,
+  "diagnostics": {
+    "read": {
+      "text": "Readback screer !es! ). cpon this !i!o unoditeo, sczm))xm 3x 3JYmCJu\n0O o llI| rn m cl d ee e mm _ _ p L  JL7 >~-~__? :dLJOLIWLXXL3<LxmL uv\nThe quick brour +ox juwps ovor tho lazy dog: u1234S6789, dormu\nPACK MY BOX W1!H #1v( DO2#N L!QUnk Juus; sPH1Nx OF BLACK QUAP72_ JUDGE MY VOu)\n  if (a[i] <m b[j] && c tw i LL bxr LmcucqnJL\"L J~xHauLJ_uL7=C-wL=<~ 2; }            ;                             \"\n    neturn f\"{name!r}: {value:>8.2f} @ [rate*100:.1f]% #{cmmriJ?q\n      mxLW m %CrVVusensVYneadbackYYtests\\\\fixtures\\\\screer-ixmdLdpdrL\n        zmLO= HrLmirLAAmcmwiLmpmmeAxMm=LGc=1mFnag'; home m $HOMEV.tmmddx                                     7\n         JmrmrL~H=uummrrmrHcLJ~J_L--xUukuuuH_LJLdxnqL~~XLJLL--HHuL\n                           [\nLedgerz 3t-fW+O tvl ]3)3 366.66 ] ID-0010 OO00 11lI 010.03 ] 3t-dimW 1l|1\nHixed: a29 tY8 cX9 dW6 eV5 fU4 gT3 hS2 lRl |Q0 WR9 LO8 wk7 nH6 oLS pku\n=airs: () [] {] <> \"\" '' `` // Y\\ F[ Gk~~F~--J== D=~=cJ~mm~eJWLmmrJmp tt ^^ ~~                           L",
+      "summary": [
+        "2026-09-23 \u00b7 491e4e5\nframe 2160 x 3840, rectified 1600 x 950, aspect 1.684 (known)",
+        "grid: from the screen profile, spacing x0.996 across and x0.989 down, columns moved 0.11 cell, text agrees (best width x0.996)",
+        "body: y 0\u2013950",
+        "gutter edge: x=76, text right: x=1600",
+        "cell pitch: 21.96 x 45.72 px (profile), rows: 20"
+      ]
+    }
+  }
+}

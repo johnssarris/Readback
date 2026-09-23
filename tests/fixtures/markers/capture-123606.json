@@ -1,0 +1,28 @@
+{
+  "kind": "photo",
+  "text": "screen-test.txt",
+  "lines": [1, 13],
+  "note": "Readback capture 2026-09-23 12:36:06, laptop, Notepad++ plain view at 150% display scaling, overlay.py markers and label, 4K frame from the app at 491e4e5 with the profile entered. In the app the detector said found in 344 ms and the grid came from the profile; what the app read is under diagnostics.read. Cropped losslessly to the monitor (y 1376-2880 of the 2160x3840 frame). Corners checked by eye against a 3x zoom of each marker. lines and scaling read off the overlay's label.",
+  "corners": [
+    [184, 194.1],
+    [2062.4, 180.7],
+    [2074.9, 1308.8],
+    [183.7, 1316.9]
+  ],
+  "frame": { "width": 2160, "height": 3840, "cropX": 0, "cropY": 1376 },
+  "paneSize": { "width": 1177, "height": 699 },
+  "profile": { "advance": 16.216, "lineHeight": 34, "textLeft": 56 },
+  "scaling": 1.5,
+  "diagnostics": {
+    "read": {
+      "text": "Readback sc:err !xs! ). cpon tnis filo unoditod, scro11erLimC)JzmCJa\n0O o 1lI| rn m cl d ev e mm _ _ p L  JC7 -~-~__? !d J2 !!L+& S< xm uv                            \"\nThe quic& broar +oa juwps over tho lazy dog: 0t234S6789, done.\nPACK MY BOX W17H F1VE DO2EN L1QUOR JUGS; SPKINX OF BLACK QUART2_ JUDGE MY VDu)                          4\n  if (a[i] <= b[j] && c t= i LL DrX LmcJcqnJL'L J xdaaLJ_uL7=C-wL=<~ 2; }\n    neturn f\"{name!r}: {value:>8.2f} @ [rate*100:.1f]% #{crmriJ?q\n      mxLW = MCrVVdsecsY\\ceadback\\\\tests\\\\fixtures\\\\scremr-ixmdLdpdrL\n       OrmLJ= UrLOmrLA6mmmmiLmDmmxAx'W=Lkc=Z=Fnag'; home = $HOME/.trr3dx\n         JurWrL~H=JummrrOWWcLDLJJL-~xUuKunuHLLJLJxHqL~~3LJFL--HHnr\n\nLedger: 1D-6663 6Vf i3]3 300.96 ] ID-0010 OO00 11l1 0i0.td j 3t~dimmLt(|1\nn}xod: a29 bY8 cX7 dW6 eV5 fU4 gT3 hS2 iR1 |Q0 kP9 (O8 mN9 nHs oLs pku\nmx}pc; () [] {} <> \"\" '' `` // VV [[ GL FF---mmw LwOcw kw eeJwL mr pp tt ~* 4~                           ,",
+      "summary": [
+        "2026-09-23 \u00b7 491e4e5\nframe 2160 x 3840, rectified 1600 x 950, aspect 1.684 (known)",
+        "grid: from the screen profile, spacing x0.996 across and x0.990 down, columns moved 0.10 cell, text agrees (best width x0.996)",
+        "body: y 0\u2013950",
+        "gutter edge: x=76, text right: x=1600",
+        "cell pitch: 21.96 x 45.75 px (profile), rows: 20"
+      ]
+    }
+  }
+}

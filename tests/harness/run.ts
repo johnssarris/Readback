@@ -24,6 +24,7 @@ import { measureCapture } from "./capture";
 import {
   characterErrorRate,
   columnWander,
+  errorBreakdown,
   inkAccuracy,
   indentAccuracy,
   inkMap,
@@ -202,6 +203,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   if (rows) {
     text = rowsToText(rows);
     metrics.cer = characterErrorRate(text, fixture.lines.join("\n"));
+    metrics.errors = errorBreakdown(rows, fixture.rows);
 
     const expected = fixture.rowNumbers;
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
@@ -245,6 +247,7 @@ function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunRe
       markerErrorPx: null,
       columnWanderCells: null,
       capture: null,
+      errors: null,
     },
     text: null,
     rectified: image,
@@ -307,6 +310,7 @@ function score(
     markerErrorPx: null,
     columnWanderCells: columnWander(rectified, margins, pitch),
     capture: null,
+    errors: null,
   };
 }
 

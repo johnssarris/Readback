@@ -1,0 +1,28 @@
+{
+  "kind": "photo",
+  "text": "screen-test.txt",
+  "lines": [1, 13],
+  "note": "Readback capture 2026-09-23 12:35:40, laptop, Notepad++ plain view at 150% display scaling, overlay.py markers and label, 4K frame from the app at 491e4e5 with the profile entered. In the app the detector said found in 614 ms and the grid came from the profile; what the app read is under diagnostics.read. Cropped losslessly to the monitor (y 1168-2736 of the 2160x3840 frame). Corners checked by eye against a 3x zoom of each marker. lines and scaling read off the overlay's label.",
+  "corners": [
+    [128.7, 219.2],
+    [2081.5, 179.1],
+    [2114.6, 1389],
+    [102.2, 1374]
+  ],
+  "frame": { "width": 2160, "height": 3840, "cropX": 0, "cropY": 1168 },
+  "paneSize": { "width": 1177, "height": 699 },
+  "profile": { "advance": 16.216, "lineHeight": 34, "textLeft": 56 },
+  "scaling": 1.5,
+  "diagnostics": {
+    "read": {
+      "text": "Readback screer !rs! ). cpor :n]x !]!o unooi!eo_ sr:m))xmL3x 3JzmCJa\n0O o llI| rn m cl d ev e mm _ _ p L CJL7 >~>~__? :dLJOL2WLYXL3mLxmL uv\nThe quick browr +oa juwpa ovor tho lazy dog: ni23uS6989, dmrmu\nRACK MY BOX W1?H #1vt Dc2#w L1QUnn Juus; snk!Nx OP BLACk QUAP72_ JUDGE MY VOu]\n  rF (a[i] <m b[j] && c tw i FF bxl LmcucqrJL\"L JCaHauLH_uL7mL-wL=<~ 2; }            |           |            J    J\n    neLurn f\"{name!r]: {value:>8.2+] @ {rate*100:.1+]% #{rrmraJ?q\n      irLW = %CrVVusers\\\\readback\\\\tests\\\\fixtures\\\\scremr-ixmdLdpdrF\n       JrmLO= HrLLirLAAmmmwmLepcmeAx'm=tLc=1#Fnag'; home m $HOME/.crr3dx                                     `\n         JmrmrL-H=uummrrmrDcLO<J_L--xLuuuuuH_LqCJxpqn~~3LJLL--HHnr\n                           ]                 L\nLedger: 1D-66%J tvl ]3)3 366uff ] ID-0030 OO00 11l1 010.83 j 3t-dimmLt([1                                              J\nn1xed: a29 bY8 cX7 dW6 eV5 fU4 gT3 hS2 iR1 |Q0 kP9 LO8 mN7 nH6 oLS pKu                                                   ,\n=a[rs: () [] {} <> \"\" '' `` // \\\\ [[ Gk ~F~--J== Dm~mmJ*cDeeJwLmmrump LL tt -~                           3",
+      "summary": [
+        "2026-09-23 \u00b7 491e4e5\nframe 2160 x 3840, rectified 1600 x 950, aspect 1.684 (known)",
+        "grid: from the screen profile, spacing x0.996 across and x0.992 down, columns moved 0.12 cell, text agrees (best width x0.996)",
+        "body: y 0\u2013950",
+        "gutter edge: x=76, text right: x=1600",
+        "cell pitch: 21.96 x 45.84 px (profile), rows: 20"
+      ]
+    }
+  }
+}
