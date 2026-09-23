@@ -1,6 +1,8 @@
 {
-  "_doc": "The corner markers' geometry, shared by overlay.py, the fixture renderer and the detector. See tools/README.md. Pixels at 100% display scaling; the overlay scales them by the pane's DPI.",
+  "_doc": "The corner markers' geometry, shared by overlay.py, the fixture renderer and the detector. See tools/README.md. Pixels at 100% display scaling; the overlay scales them by the pane's DPI. labelPx and labelGapPx size the overlay's profile label, which sits beside the bottom-left marker; the detector does not look for it.",
   "armPx": 40,
   "thickPx": 8,
-  "marginPx": 6
+  "marginPx": 6,
+  "labelPx": 14,
+  "labelGapPx": 6
 }

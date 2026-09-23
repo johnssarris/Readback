@@ -264,13 +264,30 @@ export interface PaneAspect {
   /** Width over height of the pane itself, not of its photograph. */
   aspect: number;
   method: AspectMethod;
+  /**
+   * A known aspect that was given and set aside, because the camera disagreed
+   * with it by more than KNOWN_ASPECT_TOLERANCE. Whatever it came with - the
+   * pane's size, its grid - describes some other pane, most likely the same
+   * window before it was resized, and is not to be used either.
+   */
+  setAside?: number;
 }
+
+/**
+ * How far the camera's own answer may be from a given aspect before the given
+ * one is taken to be out of date. The camera's answer was within 0.9% on every
+ * real capture (tests/markers.photos.test.ts), and a window resized by hand
+ * changes its proportions by more than this almost however it is dragged.
+ */
+export const KNOWN_ASPECT_TOLERANCE = 0.02;
 
 /**
  * Width over height of the pane the four corners (TL, TR, BR, BL) surround.
  *
  * The pane's own size, when the screen side has said what it is, is the
- * answer and nothing is estimated. Otherwise the corners are taken back
+ * answer and nothing is estimated - unless the camera can check it and says
+ * otherwise, in which case it is out of date and set aside (see
+ * KNOWN_ASPECT_TOLERANCE). Otherwise the corners are taken back
  * through the assumed camera (see Intrinsics): the homography from a unit
  * square to the corners is K [r1 r2 t] diag(w, h, 1), so the lengths of its
  * first two columns, with K taken off, are in the ratio w to h.
@@ -286,20 +303,27 @@ export function estimatePaneAspect(
   corners: Point[],
   options: { intrinsics?: Intrinsics; knownAspect?: number } = {}
 ): PaneAspect {
-  if (options.knownAspect !== undefined && Number.isFinite(options.knownAspect) && options.knownAspect > 0) {
-    return { aspect: options.knownAspect, method: "known" };
-  }
+  const known = options.knownAspect;
+  const given = known !== undefined && Number.isFinite(known) && known > 0;
 
   const average = estimateAspectRatio(corners);
+  let measured: PaneAspect = { aspect: average, method: "edge-average" };
   if (options.intrinsics) {
     const projective = projectiveAspect(corners, options.intrinsics);
     // Far from the average means the geometry was degenerate, not that the
     // photograph was: no real shot of a pane doubles or halves its edges.
     if (Number.isFinite(projective) && projective > average / 2 && projective < average * 2) {
-      return { aspect: projective, method: "projective" };
+      measured = { aspect: projective, method: "projective" };
     }
   }
-  return { aspect: average, method: "edge-average" };
+
+  if (!given) return measured;
+  // Only the camera's answer is good enough to overrule a given one: the edge
+  // average is off by more than the tolerance on ordinary shots.
+  if (measured.method === "projective" && Math.abs(known / measured.aspect - 1) > KNOWN_ASPECT_TOLERANCE) {
+    return { ...measured, setAside: known };
+  }
+  return { aspect: known, method: "known" };
 }
 
 function projectiveAspect(corners: Point[], k: Intrinsics): number {
@@ -423,7 +447,13 @@ export function rectifyFrame(
   if (!quad) return null;
 
   const aspect = estimatePaneAspect(quad, { intrinsics: options.intrinsics, knownAspect: options.knownAspect });
-  const size = chooseOutputSize(quad, aspect.aspect, options.sizing);
+  // A pane size that came with an aspect the camera set aside is the wrong
+  // pane's size too; the photograph decides instead.
+  const sizing: OutputSizing =
+    aspect.setAside !== undefined && options.sizing.kind === "source"
+      ? { kind: "source", oversample: options.sizing.oversample }
+      : options.sizing;
+  const size = chooseOutputSize(quad, aspect.aspect, sizing);
   const warped = warpImageData(image, image.width, image.height, quad, size.width, size.height);
   return { ...warped, corners: quad, aspect, size };
 }

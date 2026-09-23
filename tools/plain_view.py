@@ -3,6 +3,8 @@ plain_view.py: toggle Notepad++ into a plain, high-contrast view and back.
 
 Runs from a normal Python 3 install and sends standard Windows messages to
 Notepad++. No plugin needed. Run once to turn on, run again to restore.
+Turning on also starts overlay.py, if it is in the same folder, which draws
+the corner markers and exits by itself when plain view is turned off.
 
 See tools/README.md for why each setting is what it is.
 
@@ -67,6 +69,8 @@ Notes:
 import ctypes
 import json
 import os
+import subprocess
+import sys
 from ctypes import wintypes as wt
 from functools import partial
 
@@ -103,6 +107,9 @@ u32.GetMenuItemID.argtypes = [wt.HMENU, ctypes.c_int]
 u32.GetMenuItemID.restype = wt.UINT
 u32.InvalidateRect.argtypes = [wt.HWND, ctypes.c_void_p, wt.BOOL]
 ENUM_PROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 WM_SETREDRAW = 0x000B
 WM_COMMAND = 0x0111
@@ -291,6 +298,26 @@ def turn_off(state, editor):
     os.remove(STATE_FILE)
 
 
+def start_overlay():
+    """
+    Start overlay.py beside this script, if it is there, as a process of its
+    own. It finds this plain view through the state file, and exits by itself
+    when that file is deleted, so turning plain view off needs nothing more.
+    Through pythonw, so it opens no console window; if another copy is already
+    running, the new one exits at once.
+    """
+    overlay = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "overlay.py")
+    if not os.path.exists(overlay):
+        return
+    python = sys.executable
+    windowless = os.path.join(os.path.dirname(python), "pythonw.exe")
+    if os.path.exists(windowless):
+        python = windowless
+    subprocess.Popen([python, overlay], close_fds=True,
+                     creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+
+
 # ---- Toggle ----
 # The saved editor handle is what state belongs to, which isn't always the
 # pane we'd pick now: splitting the view, or resizing one, changes which pane
@@ -313,3 +340,4 @@ if state:
     turn_off(state, target)
 else:
     turn_on(target)
+    start_overlay()

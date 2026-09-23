@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { calibrateCellPitch, type CellPitch } from "../../src/pipeline/calibrate";
 import type { MarginBounds } from "../../src/pipeline/margins";
-import { analyzeCapture } from "../../src/pipeline/analyze";
+import { analyzeCapture, prepareCapture, type GridSource, type ScreenFacts } from "../../src/pipeline/analyze";
+import type { GridProfile } from "../../src/pipeline/profileGrid";
 import { buildAtlasFromImageData, type AtlasManifest, type GlyphAtlas } from "../../src/pipeline/match";
 import {
   applyHomography,
   assumedIntrinsics,
   computeHomography,
-  rectifyFrame,
   type OutputSizing,
   type Point,
 } from "../../src/pipeline/rectify";
@@ -61,7 +61,33 @@ export interface RunResult {
   unreadable: string | null;
   /** How the rectified image was made: its size, where its proportions came from, and how long the warp took. */
   warp: { width: number; height: number; aspect: number; method: string; ms: number } | null;
+  /** Where the grid came from; see GridSource. */
+  grid: GridSource | null;
+  /** What of the screen profile was not used, and why. */
+  notes: string[];
 }
+
+/**
+ * What the screen side would have said about this fixture: the pane's size
+ * from its sidecar, or, for a render, from the pane it was drawn with; and
+ * the grid from the sidecar's `profile`, or from what a render recorded
+ * drawing. READBACK_PROFILE=off leaves the grid out, keeping the size, to
+ * measure the estimator on the same fixtures.
+ */
+function screenFacts(fixture: Fixture): ScreenFacts | null {
+  const { meta } = fixture;
+  const rect = meta.truth?.paneRect;
+  const pane = meta.paneSize ?? (rect ? { width: rect.right - rect.left, height: rect.bottom - rect.top } : null);
+  if (!pane) return null;
+
+  let grid: GridProfile | null = meta.profile ?? null;
+  if (!grid && rect && meta.truth) {
+    grid = { advance: meta.truth.cellWidthPx, lineHeight: meta.truth.cellHeightPx, textLeft: meta.truth.textAreaLeftX - rect.left };
+  }
+  return { pane, grid: PROFILE_OFF ? null : grid };
+}
+
+const PROFILE_OFF = process.env.READBACK_PROFILE === "off";
 
 /**
  * Runs a fixture through the same sequence CaptureController does - rectify,
@@ -116,12 +142,15 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   // one - a render, or the camera simulation, which is not a pinhole camera -
   // there is no camera to reason about, and the edges are averaged.
   const frame = fixture.meta.frame;
+  const facts = screenFacts(fixture);
   const started = performance.now();
-  const warped = rectifyFrame(image, corners, {
+  const prepared = prepareCapture(image, corners, {
+    facts,
     sizing: SIZING,
     intrinsics: frame ? assumedIntrinsics(frame.width, frame.height, { x: frame.cropX, y: frame.cropY }) : undefined,
   });
-  if (!warped) throw new Error(`${fixture.name}: its corners are not a quad`);
+  if (!prepared) throw new Error(`${fixture.name}: its corners are not a quad`);
+  const warped = prepared.rectified;
   const warp = {
     width: warped.width,
     height: warped.height,
@@ -134,7 +163,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   // Markers name the pane itself, so what was rectified has no chrome in it.
   // The same call the app makes, so what is measured is what the app reads.
   const atlas = loadAtlas();
-  const analysis = analyzeCapture(rectified, markers ? "pane" : "window", atlas);
+  const analysis = analyzeCapture(rectified, markers ? "pane" : "window", atlas, prepared.known);
   if (!analysis.margins) throw new Error(analysis.summary.join("; "));
   const margins = analysis.margins;
   const pitch = analysis.pitch ?? calibrateCellPitch(rectified, margins);
@@ -152,8 +181,7 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
   };
   const metrics = score(fixture, rectified, margins, pitch, view);
 
-  const paneSize = fixture.meta.paneSize ?? (pane ? { width: pane.right - pane.left, height: pane.bottom - pane.top } : null);
-  if (markers && paneSize) metrics.capture = measureCapture(image, markers.corners, paneSize);
+  if (markers && facts) metrics.capture = measureCapture(image, markers.corners, facts.pane);
 
   if (markers && pane) {
     const want: Point[] = [
@@ -179,7 +207,18 @@ export function runFixture(fixture: Fixture, mode: Mode, camera?: CameraOptions)
     if (expected) metrics.numberAccuracy = numberAccuracy(rows, expected);
   }
 
-  return { margins, pitch, metrics, text, rectified, scale: view.scale, unreadable: null, warp };
+  return {
+    margins,
+    pitch,
+    metrics,
+    text,
+    rectified,
+    scale: view.scale,
+    unreadable: null,
+    warp,
+    grid: analysis.gridSource,
+    notes: [...prepared.notes, ...analysis.summary.filter((line) => line.startsWith("screen profile"))],
+  };
 }
 
 /**
@@ -211,6 +250,8 @@ function unread(fixture: Fixture, image: ImageData, report: MarkerReport): RunRe
     rectified: image,
     scale: { x: 1, y: 1 },
     warp: null,
+    grid: null,
+    notes: [],
     unreadable:
       `${report.outcome} (ink<=${report.threshold}, ${report.blobs} blobs, ` +
       `${CORNER_ORDER.map((c) => `${c}:${report.candidates[c]}`).join(" ")}, ` +

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import geometry from "../../tools/marker-geometry.json";
 import { ARM, FILL_RATIO, MARGIN, THICK } from "./markerGeometry";
 
 /**
@@ -27,6 +28,13 @@ describe("marker geometry", () => {
     expect(constantIn(overlay, "ARM")).toBe(ARM);
     expect(constantIn(overlay, "THICK")).toBe(THICK);
     expect(constantIn(overlay, "MARGIN")).toBe(MARGIN);
+  });
+
+  // The label is not looked for, but it sits beside a marker, and what keeps
+  // it clear of one is these two numbers.
+  it("matches the overlay's profile label", () => {
+    expect(constantIn(overlay, "LABEL_PX")).toBe(geometry.labelPx);
+    expect(constantIn(overlay, "LABEL_GAP")).toBe(geometry.labelGapPx);
   });
 
   it("expects an L that is about a third ink", () => {

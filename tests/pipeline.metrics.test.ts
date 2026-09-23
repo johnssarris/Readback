@@ -47,7 +47,7 @@ describe("pipeline metrics", () => {
       if (fixture.meta.kind === "photo" && mode === "camera") continue;
 
       it(`${fixture.name} [${mode}]`, () => {
-        const { metrics, margins, pitch, unreadable, warp } = runFixture(fixture, mode);
+        const { metrics, margins, pitch, unreadable, warp, grid, notes } = runFixture(fixture, mode);
 
         // Nothing downstream ran, so there are no numbers to print - only the
         // reason, which is the whole result for that row.
@@ -70,10 +70,14 @@ describe("pipeline metrics", () => {
             `num ${metrics.numberAccuracy === null ? "n/a" : fmt(metrics.numberAccuracy * 100, 1, "%")}`.padEnd(12),
             `marker ${metrics.markerErrorPx === null ? "n/a" : fmt(metrics.markerErrorPx, 2, "px")}`.padEnd(15),
             `wander ${fmt(metrics.columnWanderCells, 2)}`.padEnd(12),
+            `grid ${grid ?? "-"}`.padEnd(15),
             capture(metrics.capture).padEnd(38),
             warp ? `out ${warp.width}x${warp.height} ${warp.aspect.toFixed(3)} ${warp.method} ${warp.ms.toFixed(0)}ms` : "",
           ].join(" ")
         );
+        // Why the screen profile was not used, when it was not: a row whose
+        // grid was estimated in spite of a profile is worth knowing about.
+        for (const note of notes) rows.push(`${"".padEnd(26)} ${note}`);
 
         // Sanity only: the run produced a grid at all.
         expect(margins.gutterRightEdgeX).toBeGreaterThan(0);

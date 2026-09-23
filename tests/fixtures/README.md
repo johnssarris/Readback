@@ -41,13 +41,21 @@ the text's font, and its advance width is not the text's.
 
 ## Adding one from the app
 
-The app's **Save** button, in the adjust step after freezing, writes one zip
-holding a `.jpg` and a `.json` under the same timestamped name. Unzip it here,
-put the text the window was showing beside it, and point the sidecar's `text`
-at that file — it is written as `REPLACE-ME.txt`, since only the person who
-took the shot knows what was on the screen. Everything else is filled in: the
+The app's **Keep** button, in the adjust step after freezing or on the result
+screen, keeps the shot on the phone; **Send n**, on the live screen, then sends
+every shot kept that session as one zip, a `.jpg` and a `.json` per shot under
+the shot's timestamped name. A shot kept from the result screen also carries
+what the app read from it, under `diagnostics.read`. Kept shots survive the app
+being closed, and stay kept if the share sheet is dismissed. Unzip it here. If
+"Text on screen" was set on the start screen, the sidecar already names the
+text (`screen-test.txt`, see `tools/README.md`); otherwise it says
+`REPLACE-ME.txt`, and the text the window showed has to be put beside it and
+named. A text file longer than the screen is cut to what was on it: from the
+top, or from `"lines": [first, last]` (counting from 1) when the sidecar gives
+them. Everything else is filled in: the
 corners the capture was actually read at, the pane's size when it was given on
-the start screen (which the capture measurements need), and a `diagnostics`
+the start screen (which the capture measurements need), the grid as
+`profile` when the whole profile line was given, and a `diagnostics`
 block with the
 frame size, what the camera track was doing, and the detector's account of the
 frame. Nothing in the harness reads `diagnostics`; it is there for whoever is
@@ -130,6 +138,23 @@ corners:
 ```sh
 jpegtran -copy none -crop 1080x944+0+400 -outfile markers/capture-121834.jpg readback-20260922-121834.jpg
 ```
+
+## Screen profiles
+
+A photo's sidecar may carry the grid `overlay.py` printed for it, in screen
+pixels from the pane's corner:
+
+```json
+"profile": { "advance": 10.75, "lineHeight": 23, "textLeft": 42 }
+```
+
+With it, and `paneSize`, the harness reads the capture the way the app does
+with the whole profile line given. Only ever what was printed on the machine:
+a guessed one makes the table measure the guess. A render's is taken from what
+it recorded drawing. `READBACK_PROFILE=off npm run metrics` leaves every grid
+out, keeping the sizes, to measure the estimator on the same fixtures; the
+`grid` column says which one read each row, and a line under a row says why a
+profile was set aside.
 
 ## Capture measurements
 

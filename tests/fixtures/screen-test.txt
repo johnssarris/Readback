@@ -1,0 +1,23 @@
+Readback screen test 1. Open this file unedited, scrolled to line 1.
+0O o 1lI| rn m cl d vv w nn . , ; : ' " ` ~ - _ ^ 5S 2Z 8B 6G 9g qg uv
+The quick brown fox jumps over the lazy dog: 0123456789, done.
+PACK MY BOX WITH FIVE DOZEN LIQUOR JUGS; SPHINX OF BLACK QUARTZ, JUDGE MY VOW!
+  if (a[i] <= b[j] && c != d || !e) { x = y % 7; } else { z ^= ~w >> 2; }
+    return f"{name!r}: {value:>8.2f} @ {rate*100:.1f}% #{count}";
+      path = "C:\\Users\\readback\\tests\\fixtures\\screen-test.txt"
+        url = 'https://example.com/a?b=1&c=2#frag'; home = $HOME/.config
+          total += amounts[k] * (1 - discount) / (qty + 0.5) - fee
+
+Ledger: ID-0001 O/0 lIl1 100.00 | ID-0010 OO00 11lI 010.01 | ID-1000 Il|1
+Mixed: aZ9 bY8 cX7 dW6 eV5 fU4 gT3 hS2 iR1 jQ0 kP9 lO8 mN7 nM6 oL5 pK4
+Pairs: () [] {} <> "" '' `` // \\ || && ++ -- == != <= >= ** %% ## @@ $$ ^^ ~~
+Words: minimum illicit rhythm quizzical jukebox vexed wyvern gymnasium fjord
+  Tabs are spaces here: two, four, six, eight columns in, then back to two.
+    def check(line: str) -> bool: return line.strip().startswith(("#", "//"))
+Numbers: 3.14159 2.71828 1.41421 -0.57721 +6.02e23 0x1F 0b1010 0o777 1_000
+Punctuation: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ and once more !"#$%&'()*+,-./
+Confusable run: Il1| O0o rnm clld vvw ,.;: '"` -_~ oO0Qq bdpq 6b9q 5S2Z 8B3E
+Long word at the end: counterrevolutionaries internationalization
+Upper then lower: ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz
+  Last indented line? Two columns in, ending with a colon and a slash:/
+End of screen test 1. Line 23 is the last; nothing below it matters.

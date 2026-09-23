@@ -115,6 +115,25 @@ export function calibrateCellPitch(image: ImageData, margins: MarginBounds): Cel
 }
 
 /**
+ * Rows whose place is already known - laid out from the screen's own numbers
+ * rather than found - finished the way detected ones are: trimmed at the ends
+ * to the rows with anything on them, and each hung from the baseline the line
+ * numbers' feet give. Known spacing does not say where in its box the text
+ * sits; that depends on the font's ascent, and the feet measure it.
+ */
+export function placeKnownRows(
+  image: ImageData,
+  margins: MarginBounds,
+  centers: number[],
+  pitch: number
+): { centers: number[]; baselines: number[] } {
+  const y0 = Math.max(0, Math.round(margins.bodyTopY));
+  const kept = withInk(centers, rowInkProfile(image, margins), y0, pitch);
+  if (kept.length === 0) return { centers: kept, baselines: [] };
+  return { centers: kept, baselines: fitBaselines(analyzeGutter(image, margins), kept[0], pitch, kept) };
+}
+
+/**
  * Picks the cell boundary the first column starts at.
  *
  * The boundaries repeat every cell, so any one of them describes the same grid.

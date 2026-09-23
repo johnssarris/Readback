@@ -67,6 +67,31 @@ a matching face is still the reference.
 pixels at different Windows scaling, so the same `SIZE` is a different size on
 screen. Keep it at 100% if anything downstream measures in pixels.
 
+## The test text
+
+For anything that will be measured, have `tests/fixtures/screen-test.txt` open
+in Notepad++, from the repository checkout, scrolled to line 1, and choose it
+under "Text on screen" on the app's start screen. Captures saved then name it,
+and are scored against it as they are dropped into `tests/fixtures/` - nobody
+has to read the text back off the photograph.
+
+It is written for the job rather than borrowed. `plain_view.py`, which earlier
+captures showed, changed between sessions, so what was on screen had to be
+worked out after the fact; and it is mostly lower-case prose, which never
+tests a `0` against an `O` or a `1` against an `l`. The test text is 23 lines,
+one screenful of the pane the photographs so far were taken of, with:
+
+- every printable ASCII character, three times or more;
+- rows of the characters most easily mistaken for each other: `0O o 1lI|`,
+  `rn m`, `cl d`, `vv w`, `,.;:`, `'"` and a backtick;
+- lines running to 78 columns, so the text reaches the right-hand side of the
+  pane, which is where a grid that is slightly out shows it most;
+- several depths of indentation, and one blank line.
+
+Leave it unedited: its lines are the ground truth. On a pane too short to show
+all of it, or scrolled, add `"lines": [first, last]` to the capture's sidecar -
+the range is on the overlay's label in the photograph.
+
 ## The corner markers
 
 `overlay.py` draws an L at each corner of the editor pane. The L's outer
@@ -111,8 +136,85 @@ renderer and the detector both read it. `overlay.py` keeps its own copy, since
 it runs on a different machine and imports nothing, and a test reads the
 constants back out of it and fails if the two have drifted apart.
 
-Status: the overlay is a standalone test version, run by hand while plain view
-is on. `plain_view.py` does not launch it.
+## The profile line
+
+`overlay.py` also prints the character grid, as the editor itself reports it:
+
+```
+profile: 985 x 563, cell 10.750 x 23, text at 42
+```
+
+That is the pane's size, one cell's width and height, and where the first
+column of text starts, in screen pixels from the pane's top-left corner. Typed
+or pasted into the app's start screen, it replaces searching the photograph for
+the grid with laying it out: a capture framed by the markers is the pane and
+nothing else, so every one of those numbers is a fixed multiple of its pixels.
+
+**Why the editor is asked rather than the font.** A point size and a display
+scaling do not settle the grid. Cascadia Mono at 14 pt comes to 10.94 px a cell
+by its metrics; the photographs measure 10.75. The editor lays text out in
+fractions of a pixel and adds padding of its own, and only it knows the result.
+
+**How it is asked.** Only messages that take and return integers, the same kind
+`plain_view.py` already sends, since a pointer handed to another process means
+nothing there. The cell width is how far a line's text runs across the pane
+over how many columns it has, pooled over every line on screen that is at least
+20 characters and fits on one row, so one pixel of rounding at each end comes
+to a few thousandths of a pixel per cell. Lines whose width per column is
+unlike the rest - wide characters - are left out.
+
+**When it cannot be read**, the line gives the pane's size alone and the next
+one says why: Notepad++ running as administrator (its messages go unanswered),
+or no line long enough on screen. The size alone is still worth giving.
+
+**When it is wrong.** A profile printed before the window was resized or the
+font changed describes another grid, and the app checks for both on every
+capture. The camera's own measure of the pane's proportions is within 1% of
+the truth, so a size more than 2% from it is set aside. And the text is asked
+which cell width it lines up best at: within 3% of the profile's, the profile
+stands; a font size away - about 7% - it is set aside. Either way the grid is
+then estimated from the photograph, as it was before there was a profile, and
+the result screen says why.
+
+It is printed whenever the pane moves or resizes, or the line height or zoom
+changes. Keep display scaling at 100%: the pane's size is in device pixels, and
+at other scalings the editor may be answering in scaled ones.
+
+## The label
+
+The overlay also draws the profile on screen, on a white tile in the status bar
+just right of the bottom-left marker:
+
+```
+985 x 563, cell 10.750 x 23, text at 42 · lines 7-30 · 100%
+```
+
+It is there so every photograph carries the facts of the screen it was taken
+of. Without it, a capture is only as good as whatever was typed into the app
+that day - and whether that was this monitor or the laptop, before or after the
+window was last resized, at which display scaling, is exactly what is hard to
+tell afterwards. `lines` is the first and last document line wholly on screen,
+which is what a capture's sidecar needs to be scored against the test text when
+it was not scrolled to the top. The scaling is Windows' display scaling for
+the pane's monitor.
+
+It is read by a person, zooming into the photograph; nothing in the app looks
+for it yet. It sits outside the pane like the markers, so it covers no text,
+and `labelGapPx` keeps its glyphs clear of the marker's tile. They are a fraction
+of a marker's size, which the detector's size tests already set aside. When the
+pane is too narrow to fit it clear of the bottom-right marker it is not drawn.
+`labelPx` and `labelGapPx` live in `marker-geometry.json` with the markers', and
+the same test holds `overlay.py` to them.
+
+## Starting it
+
+`plain_view.py` starts `overlay.py` when it turns plain view on, through
+`pythonw` so no console window opens, and the overlay exits by itself when plain
+view is turned off. Only one copy runs at a time: a second one - started by hand
+while the hotkey's is running, say - exits at once. Started through `pythonw` it
+has nowhere to print, so the profile line is also written to
+`%TEMP%\readback_profile.txt`, to copy from. Run `python overlay.py` by hand, with
+plain view on and no other copy running, to watch what it prints.
 
 ## What the rendered fixtures are, and are not
 

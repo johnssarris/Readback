@@ -2,7 +2,16 @@ import "./style.css";
 import { CaptureController } from "./capture/CaptureController";
 import { setupUpdatePrompt } from "./updatePrompt";
 import { VERSION_LABEL } from "./version";
-import { loadPaneSize, parsePaneSize, savePaneSize } from "./settings";
+import {
+  formatScreenProfile,
+  loadScreenProfile,
+  loadTestText,
+  parseScreenProfile,
+  saveScreenProfile,
+  saveTestText,
+  TEST_TEXTS,
+  type TestText,
+} from "./settings";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -34,51 +43,82 @@ function showStartScreen(message?: string) {
   version.className = "version-badge";
   version.textContent = VERSION_LABEL;
 
-  panel.append(title, hint, button, paneSizeField(), version);
+  panel.append(title, hint, button, profileField(), testTextField(), version);
   app.appendChild(panel);
 }
 
 /**
- * Where to give the pane's size, from the line overlay.py prints. Optional:
- * left empty, the proportions are worked out from each photograph instead.
+ * Where to give the screen profile, from the line overlay.py prints. Optional,
+ * and fine half given: the pane's size alone still sets the proportions, and
+ * without either everything is worked out from each photograph.
  */
-function paneSizeField(): HTMLElement {
+function profileField(): HTMLElement {
   const field = document.createElement("label");
   field.className = "pane-size";
 
   const caption = document.createElement("span");
-  caption.textContent = "Pane size from overlay.py (optional)";
+  caption.textContent = "Screen profile from overlay.py (optional)";
 
   const input = document.createElement("input");
   input.type = "text";
-  input.inputMode = "numeric";
-  input.placeholder = "e.g. 985 x 563";
+  input.placeholder = "e.g. 985 x 563, cell 10.75 x 23, text at 42";
   input.autocomplete = "off";
-  const saved = loadPaneSize();
-  input.value = saved ? `${saved.width} x ${saved.height}` : "";
+  input.autocapitalize = "off";
+  input.spellcheck = false;
+  const saved = loadScreenProfile();
+  input.value = saved ? formatScreenProfile(saved) : "";
 
   const status = document.createElement("span");
   status.className = "pane-size-status";
+  status.textContent = saved ? describe(saved) : "";
 
   input.addEventListener("change", () => {
     const text = input.value.trim();
     if (text === "") {
-      savePaneSize(null);
+      saveScreenProfile(null);
       status.textContent = "Worked out from each photo.";
       return;
     }
-    const size = parsePaneSize(text);
-    if (size) {
-      savePaneSize(size);
-      input.value = `${size.width} x ${size.height}`;
-      status.textContent = "Saved.";
+    const profile = parseScreenProfile(text);
+    if (profile) {
+      saveScreenProfile(profile);
+      input.value = formatScreenProfile(profile);
+      status.textContent = `Saved. ${describe(profile)}`;
     } else {
-      status.textContent = "Width x height, like 985 x 563.";
+      status.textContent = "Not a profile. Paste the line overlay.py printed, or just the pane size, like 985 x 563.";
     }
   });
 
   field.append(caption, input, status);
   return field;
+}
+
+/**
+ * Which test text is open in the editor, if one is, so a saved capture names
+ * it and is scored against it without anyone reading the photo.
+ */
+function testTextField(): HTMLElement {
+  const field = document.createElement("label");
+  field.className = "pane-size";
+
+  const caption = document.createElement("span");
+  caption.textContent = "Text on screen (for saved captures)";
+
+  const select = document.createElement("select");
+  const none = new Option("Something else", "");
+  select.append(none, ...TEST_TEXTS.map((name) => new Option(name, name)));
+  select.value = loadTestText() ?? "";
+  select.addEventListener("change", () => saveTestText((select.value || null) as TestText | null));
+
+  field.append(caption, select);
+  return field;
+}
+
+/** What a saved profile will be used for, so a half-given one says which half is missing. */
+function describe(profile: NonNullable<ReturnType<typeof loadScreenProfile>>): string {
+  return profile.grid
+    ? "The grid is laid out from it, and checked against each photo."
+    : "Size only: the grid is worked out from each photo.";
 }
 
 async function start() {

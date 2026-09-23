@@ -1,17 +1,21 @@
 import { APP_VERSION, BUILD_DATE } from "../version";
 import type { MarkerReport } from "../pipeline/markers";
 import type { PaneAspect, Point } from "../pipeline/rectify";
-import type { PaneSize } from "../settings";
+import type { ScreenProfile, TestText } from "../settings";
+import type { KeptCapture } from "./captureQueue";
 import { buildZip } from "./zip";
 
 /**
- * Saving a capture, so a frame that went wrong can be looked at later.
+ * Saving captures, so a frame that went wrong can be looked at later.
  *
  * What comes out is a fixture. The sidecar is the format tests/fixtures uses,
  * with the corners as they were finally set and a diagnostics block recording
  * what the detector made of the frame and what the camera was actually doing -
  * so a bad capture drops into tests/fixtures/ unedited and becomes a case that
  * gets measured on every run from then on.
+ *
+ * A capture is encoded when it is kept, and a session's kept captures leave
+ * together, as one zip: see captureQueue.ts.
  */
 
 /** JPEG rather than PNG: a photograph of a screen, at the size a phone takes it. */
@@ -33,40 +37,58 @@ export interface CaptureRecord {
   track: MediaTrackSettings | null;
   /** The pane's proportions as a read would take them, and where they came from. */
   aspect?: PaneAspect | null;
-  /** The pane's size on screen, as given on the start screen, when it was. */
-  paneSize?: PaneSize | null;
+  /** The screen profile as given on the start screen, when it was: the pane's size, and its grid if that was given too. */
+  screen?: ScreenProfile | null;
+  /** The test text that was open, as chosen on the start screen, when it was one. */
+  testText?: TestText | null;
+  /** What the app read from it, when it was kept from the result screen. */
+  read?: { text: string; summary: string[] } | null;
 }
 
 /**
- * Writes the capture out as one zip.
+ * The capture as it will be kept: its frame as a JPEG, and its sidecar.
  *
- * One file rather than two: a sidecar without its frame describes an image
- * nobody has, and two downloads from a single tap is the thing iOS Safari is
- * least willing to do.
+ * Named after `when`, which is the moment the frame was frozen rather than
+ * the moment it was kept, so the same frame kept twice - once on its own,
+ * then again with what was read from it - is one capture, not two.
  */
-export async function saveCapture(record: CaptureRecord, now = new Date()): Promise<void> {
-  const name = stamp(now);
-  const image = await encode(record.frame);
+export async function encodeCapture(record: CaptureRecord, when: Date): Promise<KeptCapture> {
+  const name = stamp(when);
+  return { name, jpeg: await encode(record.frame), sidecar: sidecar(record, name) };
+}
 
-  const zip = buildZip(
-    [
-      { name: `${name}.jpg`, data: image },
-      { name: `${name}.json`, data: new TextEncoder().encode(sidecar(record, name)) },
-    ],
-    now
-  );
+/** How sending ended: handed to the share sheet or downloaded, or called off. */
+export type SendOutcome = "sent" | "cancelled";
 
-  await deliver(new File([zip], `${name}.zip`, { type: "application/zip" }));
+/**
+ * Sends kept captures as one zip, each as a JPEG and a sidecar under its own
+ * name, so the zip unpacks straight into tests/fixtures/.
+ */
+export async function sendCaptures(captures: KeptCapture[], now = new Date()): Promise<SendOutcome> {
+  return deliver(await bundleCaptures(captures, now));
+}
+
+/** The one zip sendCaptures hands over, named for when and how many. */
+export async function bundleCaptures(captures: KeptCapture[], now: Date): Promise<File> {
+  const entries = [];
+  for (const capture of captures) {
+    entries.push({ name: `${capture.name}.jpg`, data: new Uint8Array(await capture.jpeg.arrayBuffer()) });
+    entries.push({ name: `${capture.name}.json`, data: new TextEncoder().encode(capture.sidecar) });
+  }
+  const name = `${stamp(now)}-${captures.length}-shot${captures.length === 1 ? "" : "s"}`;
+  return new File([buildZip(entries, now)], `${name}.zip`, { type: "application/zip" });
 }
 
 /** The sidecar, in the shape tests/fixtures/README.md describes. */
 export function sidecar(record: CaptureRecord, name: string): string {
-  const { corners, report, track, frame, aspect, paneSize } = record;
+  const { corners, report, track, frame, aspect, screen } = record;
 
   return `${JSON.stringify(
     {
       kind: "photo",
-      text: "REPLACE-ME.txt",
+      // Named when a test text was chosen, so the capture is scored as it is
+      // dropped in; the file is taken from the top unless `lines` is added.
+      text: record.testText ?? "REPLACE-ME.txt",
       note: `Saved from Readback ${APP_VERSION} (${BUILD_DATE}) as ${name}`,
       // Kept even when the markers found them: they are what this capture was
       // actually read with, and a fixture that re-detects them should agree.
@@ -80,9 +102,15 @@ export function sidecar(record: CaptureRecord, name: string): string {
       // What the harness measures the shot against - camera pixels per screen
       // pixel, blur and bow are all in screen pixels - so it goes in when it
       // is known rather than being typed in afterwards.
-      ...(paneSize ? { paneSize: { width: paneSize.width, height: paneSize.height } } : {}),
+      ...(screen ? { paneSize: { width: screen.pane.width, height: screen.pane.height } } : {}),
+      // And the grid, so the capture is read in the harness the way it was
+      // read here, profile and all.
+      ...(screen?.grid ? { profile: { ...screen.grid } } : {}),
       diagnostics: {
         frame: { width: frame.width, height: frame.height },
+        // What the app made of it, when it was kept after reading: set
+        // against the text it should have read, the first thing to look at.
+        ...(record.read ? { read: record.read } : {}),
         aspect: aspect ? { value: Number(aspect.aspect.toFixed(4)), method: aspect.method } : null,
         cornersFrom: record.fromMarkers ? "markers" : "hand",
         markers: {
@@ -104,15 +132,12 @@ export function sidecar(record: CaptureRecord, name: string): string {
   )}\n`;
 }
 
-function encode(frame: HTMLCanvasElement): Promise<Uint8Array> {
+function encode(frame: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     frame.toBlob(
       (blob) => {
-        if (!blob) {
-          reject(new Error("The frame could not be encoded"));
-          return;
-        }
-        blob.arrayBuffer().then((buffer) => resolve(new Uint8Array(buffer)), reject);
+        if (blob) resolve(blob);
+        else reject(new Error("The frame could not be encoded"));
       },
       IMAGE_TYPE,
       IMAGE_QUALITY
@@ -129,17 +154,18 @@ function encode(frame: HTMLCanvasElement): Promise<Uint8Array> {
  * fallback when sharing is refused. Cancelling the share sheet is not a
  * failure and must not fall through to a download the person did not ask for.
  *
- * Sharing needs the tap that started this to still count as one, and encoding
- * the frame happens first. Encoding a phone-sized JPEG is a fraction of the
- * few seconds that lasts, but it is why nothing slower belongs in front of it.
+ * Sharing needs the tap that started this to still count as one, and the zip
+ * is built first. The frames were encoded when they were kept, so building it
+ * is only copying bytes, well inside the few seconds a tap lasts; nothing
+ * slower belongs in front of it.
  */
-async function deliver(file: File): Promise<void> {
+async function deliver(file: File): Promise<SendOutcome> {
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file] });
-      return;
+      return "sent";
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
     }
   }
 
@@ -150,6 +176,7 @@ async function deliver(file: File): Promise<void> {
   link.click();
   // Revoking immediately can cancel the download on some browsers; a tick is enough.
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return "sent";
 }
 
 /** Local time, sortable, safe in a filename: readback-20260922-154530. */
