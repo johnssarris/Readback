@@ -180,8 +180,41 @@ It is printed whenever the pane moves or resizes, or the line height or zoom
 changes. Keep display scaling at 100%: the pane's size is in device pixels, and
 at other scalings the editor may be answering in scaled ones.
 
-Status: the overlay is a standalone test version, run by hand while plain view
-is on. `plain_view.py` does not launch it.
+## The label
+
+The overlay also draws the profile on screen, on a white tile in the status bar
+just right of the bottom-left marker:
+
+```
+985 x 563, cell 10.750 x 23, text at 42 · lines 7-30 · 100%
+```
+
+It is there so every photograph carries the facts of the screen it was taken
+of. Without it, a capture is only as good as whatever was typed into the app
+that day - and whether that was this monitor or the laptop, before or after the
+window was last resized, at which display scaling, is exactly what is hard to
+tell afterwards. `lines` is the first and last document line wholly on screen,
+which is what a capture's sidecar needs to be scored against the test text when
+it was not scrolled to the top. The scaling is Windows' display scaling for
+the pane's monitor.
+
+It is read by a person, zooming into the photograph; nothing in the app looks
+for it yet. It sits outside the pane like the markers, so it covers no text,
+and `labelGapPx` keeps its glyphs clear of the marker's tile. They are a fraction
+of a marker's size, which the detector's size tests already set aside. When the
+pane is too narrow to fit it clear of the bottom-right marker it is not drawn.
+`labelPx` and `labelGapPx` live in `marker-geometry.json` with the markers', and
+the same test holds `overlay.py` to them.
+
+## Starting it
+
+`plain_view.py` starts `overlay.py` when it turns plain view on, through
+`pythonw` so no console window opens, and the overlay exits by itself when plain
+view is turned off. Only one copy runs at a time: a second one - started by hand
+while the hotkey's is running, say - exits at once. Started through `pythonw` it
+has nowhere to print, so the profile line is also written to
+`%TEMP%\readback_profile.txt`, to copy from. Run `python overlay.py` by hand, with
+plain view on and no other copy running, to watch what it prints.
 
 ## What the rendered fixtures are, and are not
 

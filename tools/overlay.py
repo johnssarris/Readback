@@ -7,8 +7,8 @@ including the scrollbar. The markers sit just outside the pane, over the tab
 bar above and the status bar below, so they never cover text, and they still
 work with the window maximized.
 
-This is a standalone test for checking marker placement on a real screen.
-With plain view on, run from a terminal:
+plain_view.py starts it when it turns plain view on. It can also be run by
+hand, with plain view on, to see what it prints:
     python overlay.py
 
 It follows the window as it moves or resizes, hides while Notepad++ isn't the
@@ -22,6 +22,15 @@ Whenever the pane or its font changes it prints a profile line:
 the pane's size, one character cell's width and height, and where the first
 column of text starts, all in pixels from the pane's top-left corner. If the
 cell can't be read, the line gives the size alone and the next line says why.
+The same lines are written to readback_profile.txt in TEMP, for when there is
+no console to print to (started by plain_view.py through pythonw).
+
+A label in the status bar, right of the bottom-left marker, shows the profile
+too, with the document lines wholly on screen and the display scaling:
+
+    985 x 563, cell 10.750 x 23, text at 42 · lines 7-30 · 100%
+
+Only one copy runs at a time; a second one exits at once.
 
 Marker geometry. Sizes are at 100% display scaling and scale with the
 pane's DPI:
@@ -67,14 +76,20 @@ def make_dpi_aware():
 DPI_MODE = make_dpi_aware()
 
 import tkinter as tk  # noqa: E402  (must come after DPI awareness)
+import tkinter.font as tkfont  # noqa: E402
 
 # ---- Settings to tweak ----
 ARM = 40            # length of each L arm, px at 100% scaling
 THICK = 8           # thickness of each arm, px at 100% scaling
 MARGIN = 6          # white border outside the L, px at 100% scaling
+LABEL_PX = 14       # height of the label's text, px at 100% scaling
+LABEL_GAP = 6       # white space round the label, and between it and a marker
+LABEL_FONT = "Consolas"
 POLL_MS = 150       # how often to check where the pane is
 KEY = "#ff00ff"     # transparent colour: pixels in this colour are see-through
 STATE_FILE = os.path.join(os.environ["TEMP"], "plain_view_state.json")
+PROFILE_FILE = os.path.join(os.environ["TEMP"], "readback_profile.txt")
+MUTEX_NAME = "Local\\ReadbackOverlay"
 
 # ---- Windows API setup ----
 u32.FindWindowW.restype = wt.HWND
@@ -101,7 +116,10 @@ SCI_GETFIRSTVISIBLELINE = 2152
 SCI_POINTXFROMPOSITION = 2164
 SCI_POINTYFROMPOSITION = 2165
 SCI_POSITIONFROMLINE = 2167
+SCI_VISIBLEFROMDOCLINE = 2220
 SCI_DOCLINEFROMVISIBLE = 2221
+SCI_WRAPCOUNT = 2235
+SCI_GETLINECOUNT = 2154
 SCI_TEXTHEIGHT = 2279
 SCI_LINESONSCREEN = 2370
 SCI_GETZOOM = 2374
@@ -215,16 +233,66 @@ def grid_profile(pane):
     return (advance, line_height, text_left), None
 
 
-def profile_lines(pane, rect):
-    """The profile line, and the reason the cell is missing if it is."""
+def profile_text(pane, rect):
+    """
+    The profile, without its "profile:" prefix, and the reason the cell is
+    missing if it is.
+    """
     left, top, right, bottom = rect
-    size = "profile: %d x %d" % (right - left, bottom - top)
+    size = "%d x %d" % (right - left, bottom - top)
     grid, reason = grid_profile(pane)
     if grid is None:
-        return [size, "cell not read: " + reason]
+        return size, reason
     advance, line_height, text_left = grid
-    return ["%s, cell %.3f x %d, text at %d"
-            % (size, advance, line_height, text_left)]
+    return ("%s, cell %.3f x %d, text at %d"
+            % (size, advance, line_height, text_left)), None
+
+
+def whole_lines(pane):
+    """
+    The first and last document lines wholly on screen, counting from 1.
+    A line wrapped over several rows counts only if all of them show.
+    """
+    first_row = sci(pane, SCI_GETFIRSTVISIBLELINE)
+    last_row = first_row + sci(pane, SCI_LINESONSCREEN) - 1
+    count = sci(pane, SCI_GETLINECOUNT)
+
+    first = sci(pane, SCI_DOCLINEFROMVISIBLE, first_row)
+    if sci(pane, SCI_VISIBLEFROMDOCLINE, first) < first_row:
+        first += 1                     # its first rows are above the pane
+    last = min(sci(pane, SCI_DOCLINEFROMVISIBLE, last_row), count - 1)
+    if (sci(pane, SCI_VISIBLEFROMDOCLINE, last)
+            + sci(pane, SCI_WRAPCOUNT, last) - 1 > last_row):
+        last -= 1                      # its last rows are below the pane
+    return first + 1, last + 1
+
+
+def report(profile, reason):
+    """Print the profile, and keep it in PROFILE_FILE for when nothing shows."""
+    lines = ["profile: " + profile]
+    if reason:
+        lines.append("cell not read: " + reason)
+    for line in lines:
+        print(line)
+    try:
+        with open(PROFILE_FILE, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def single_instance():
+    """
+    Holds a named mutex for as long as this process runs, or returns None if
+    another copy already holds it.
+    """
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = wt.HANDLE
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
+    handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if ctypes.get_last_error() == 183:          # ERROR_ALREADY_EXISTS
+        return None
+    return handle
 
 
 # Each corner's window is a white tile, (a + 2m) wide by (a + m) tall, holding
@@ -252,6 +320,74 @@ def origin(corner, rect, a, m):
     return x, y
 
 
+def passive_window(root):
+    """A borderless, always-on-top window whose KEY colour is see-through."""
+    win = tk.Toplevel(root)
+    win.overrideredirect(True)
+    win.attributes("-topmost", True)
+    win.attributes("-transparentcolor", KEY)
+    win.configure(bg=KEY)
+    canvas = tk.Canvas(win, bg=KEY, highlightthickness=0, bd=0)
+    canvas.pack(fill="both", expand=True)
+    win.update_idletasks()
+    make_passive(win)
+    return win, canvas
+
+
+def make_passive(win):
+    """Click-through, no taskbar button, never steals focus."""
+    hwnd = u32.GetParent(win.winfo_id()) or win.winfo_id()
+    style = u32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+    u32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
+                          style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW
+                          | WS_EX_NOACTIVATE)
+
+
+def hide(win):
+    # Moved off-screen rather than withdrawn: showing a window again can
+    # activate it, which would take focus from Notepad++.
+    win.geometry("+-10000+-10000")
+
+
+class Label:
+    """
+    One line of black text on a white tile, in the band below the pane, just
+    right of the bottom-left marker's tile. Hidden when the pane is too narrow
+    to fit it clear of the bottom-right marker.
+    """
+
+    def __init__(self, root):
+        self.window, self.canvas = passive_window(root)
+        self.drawn = None
+
+    def place(self, rect, scale, text):
+        left, top, right, bottom = rect
+        a = max(4, round(ARM * scale))
+        m = max(2, round(MARGIN * scale))
+        g = max(2, round(LABEL_GAP * scale))
+        px = max(8, round(LABEL_PX * scale))
+        font = tkfont.Font(family=LABEL_FONT, size=-px)
+        w = font.measure(text) + 2 * g
+        h = font.metrics("linespace") + g
+        x = left - m + (a + 2 * m) + g
+        if x + w > right - a - m - g:
+            hide(self.window)
+            self.drawn = None
+            return
+        if self.drawn != (text, px):
+            self.drawn = (text, px)
+            self.canvas.delete("all")
+            self.canvas.configure(width=w, height=h)
+            self.canvas.create_rectangle(0, 0, w, h, fill="white", outline="")
+            self.canvas.create_text(g, g // 2, text=text, font=font,
+                                    fill="black", anchor="nw")
+        self.window.geometry("%dx%d%+d%+d" % (w, h, x, bottom))
+
+    def hide(self):
+        hide(self.window)
+        self.drawn = None
+
+
 class Markers:
     CORNERS = ("tl", "tr", "bl", "br")
 
@@ -260,26 +396,7 @@ class Markers:
         self.canvases = {}
         self.size = None
         for c in self.CORNERS:
-            win = tk.Toplevel(root)
-            win.overrideredirect(True)
-            win.attributes("-topmost", True)
-            win.attributes("-transparentcolor", KEY)
-            win.configure(bg=KEY)
-            canvas = tk.Canvas(win, bg=KEY, highlightthickness=0, bd=0)
-            canvas.pack(fill="both", expand=True)
-            win.update_idletasks()
-            self.make_passive(win)
-            self.windows[c] = win
-            self.canvases[c] = canvas
-
-    @staticmethod
-    def make_passive(win):
-        """Click-through, no taskbar button, never steals focus."""
-        hwnd = u32.GetParent(win.winfo_id()) or win.winfo_id()
-        style = u32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-        u32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
-                              style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW
-                              | WS_EX_NOACTIVATE)
+            self.windows[c], self.canvases[c] = passive_window(root)
 
     def place(self, rect, scale):
         a = max(4, round(ARM * scale))
@@ -301,10 +418,8 @@ class Markers:
             self.windows[c].geometry("%dx%d%+d%+d" % (w, h, x, y))
 
     def hide(self):
-        # Moved off-screen rather than withdrawn: showing a window again can
-        # activate it, which would take focus from Notepad++.
         for win in self.windows.values():
-            win.geometry("+-10000+-10000")
+            hide(win)
 
 
 def main():
@@ -313,12 +428,17 @@ def main():
         raise SystemExit("Notepad++ is not running")
     if not os.path.exists(STATE_FILE):
         raise SystemExit("Plain view is off. Toggle it on first.")
+    mutex = single_instance()   # held until this process exits
+    if mutex is None:
+        raise SystemExit("The overlay is already running.")
 
     print("DPI awareness:", DPI_MODE)
     root = tk.Tk()
     root.withdraw()
     markers = Markers(root)
-    last = {"rect": None, "shown": None, "font": None, "profile": None}
+    label = Label(root)
+    last = {"rect": None, "shown": None, "view": None, "profile": None,
+            "label": None}
 
     def tick():
         if not u32.IsWindow(npp) or not os.path.exists(STATE_FILE):
@@ -344,13 +464,26 @@ def main():
                           "(%d x %d), scale %.2f"
                           % (l, t, r, b, r - l, b - t, scale))
                 last["rect"] = rect
-            font = font_state(pane)
-            if (rect, font) != (last["profile"], last["font"]):
-                for line in profile_lines(pane, rect):
-                    print(line)
-                last["profile"], last["font"] = rect, font
+            # What the profile and the label depend on: the pane, the font,
+            # and which lines are on screen. All cheap to ask every poll.
+            view = (rect, font_state(pane), sci(pane, SCI_GETFIRSTVISIBLELINE),
+                    sci(pane, SCI_LINESONSCREEN))
+            if view != last["view"]:
+                last["view"] = view
+                profile, reason = profile_text(pane, rect)
+                if profile != last["profile"]:
+                    report(profile, reason)
+                    last["profile"] = profile
+                first, final = whole_lines(pane)
+                last["label"] = "%s%s \u00b7 lines %d-%d \u00b7 %d%%" % (
+                    profile, " \u00b7 cell not read" if reason else "",
+                    first, final, round(scale * 100))
+                label.place(rect, scale, last["label"])
+            elif last["shown"] is not True:
+                label.place(rect, scale, last["label"])
         elif last["shown"] is not False:
             markers.hide()
+            label.hide()
         last["shown"] = show
 
         root.after(POLL_MS, tick)
