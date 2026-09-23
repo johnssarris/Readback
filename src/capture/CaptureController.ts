@@ -6,7 +6,7 @@ import {
   type PaneAspect,
   type Point,
 } from "../pipeline/rectify";
-import { loadPaneSize, loadScreenProfile } from "../settings";
+import { loadPaneSize, loadScreenProfile, loadTestText } from "../settings";
 import { VERSION_LABEL } from "../version";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
 import { saveCapture } from "./saveCapture";
@@ -306,6 +306,7 @@ export class CaptureController {
       report: this.report,
       track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
       screen: loadScreenProfile(),
+      testText: loadTestText(),
     })
       .catch((error) => {
         this.hint.textContent = `Could not save: ${error instanceof Error ? error.message : String(error)}`;

@@ -2,7 +2,16 @@ import "./style.css";
 import { CaptureController } from "./capture/CaptureController";
 import { setupUpdatePrompt } from "./updatePrompt";
 import { VERSION_LABEL } from "./version";
-import { formatScreenProfile, loadScreenProfile, parseScreenProfile, saveScreenProfile } from "./settings";
+import {
+  formatScreenProfile,
+  loadScreenProfile,
+  loadTestText,
+  parseScreenProfile,
+  saveScreenProfile,
+  saveTestText,
+  TEST_TEXTS,
+  type TestText,
+} from "./settings";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -34,7 +43,7 @@ function showStartScreen(message?: string) {
   version.className = "version-badge";
   version.textContent = VERSION_LABEL;
 
-  panel.append(title, hint, button, profileField(), version);
+  panel.append(title, hint, button, profileField(), testTextField(), version);
   app.appendChild(panel);
 }
 
@@ -81,6 +90,27 @@ function profileField(): HTMLElement {
   });
 
   field.append(caption, input, status);
+  return field;
+}
+
+/**
+ * Which test text is open in the editor, if one is, so a saved capture names
+ * it and is scored against it without anyone reading the photo.
+ */
+function testTextField(): HTMLElement {
+  const field = document.createElement("label");
+  field.className = "pane-size";
+
+  const caption = document.createElement("span");
+  caption.textContent = "Text on screen (for saved captures)";
+
+  const select = document.createElement("select");
+  const none = new Option("Something else", "");
+  select.append(none, ...TEST_TEXTS.map((name) => new Option(name, name)));
+  select.value = loadTestText() ?? "";
+  select.addEventListener("change", () => saveTestText((select.value || null) as TestText | null));
+
+  field.append(caption, select);
   return field;
 }
 

@@ -67,6 +67,31 @@ a matching face is still the reference.
 pixels at different Windows scaling, so the same `SIZE` is a different size on
 screen. Keep it at 100% if anything downstream measures in pixels.
 
+## The test text
+
+For anything that will be measured, have `tests/fixtures/screen-test.txt` open
+in Notepad++, from the repository checkout, scrolled to line 1, and choose it
+under "Text on screen" on the app's start screen. Captures saved then name it,
+and are scored against it as they are dropped into `tests/fixtures/` - nobody
+has to read the text back off the photograph.
+
+It is written for the job rather than borrowed. `plain_view.py`, which earlier
+captures showed, changed between sessions, so what was on screen had to be
+worked out after the fact; and it is mostly lower-case prose, which never
+tests a `0` against an `O` or a `1` against an `l`. The test text is 23 lines,
+one screenful of the pane the photographs so far were taken of, with:
+
+- every printable ASCII character, three times or more;
+- rows of the characters most easily mistaken for each other: `0O o 1lI|`,
+  `rn m`, `cl d`, `vv w`, `,.;:`, `'"` and a backtick;
+- lines running to 78 columns, so the text reaches the right-hand side of the
+  pane, which is where a grid that is slightly out shows it most;
+- several depths of indentation, and one blank line.
+
+Leave it unedited: its lines are the ground truth. On a pane too short to show
+all of it, or scrolled, add `"lines": [first, last]` to the capture's sidecar -
+the range is on the overlay's label in the photograph.
+
 ## The corner markers
 
 `overlay.py` draws an L at each corner of the editor pane. The L's outer

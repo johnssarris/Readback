@@ -96,3 +96,31 @@ export function formatScreenProfile({ pane, grid }: ScreenProfile): string {
   const size = `${pane.width} x ${pane.height}`;
   return grid ? `${size}, cell ${grid.advance} x ${grid.lineHeight}, text at ${grid.textLeft}` : size;
 }
+
+/**
+ * The test text open in the editor, by its name under tests/fixtures, so a
+ * saved capture says what was on screen instead of leaving it to be read off
+ * the photograph afterwards. Null when it was something else.
+ */
+export const TEST_TEXTS = ["screen-test.txt", "sample-varied.txt"] as const;
+export type TestText = (typeof TEST_TEXTS)[number];
+
+const TEST_TEXT_KEY = "readback.testText";
+
+export function loadTestText(): TestText | null {
+  try {
+    const raw = localStorage.getItem(TEST_TEXT_KEY);
+    return TEST_TEXTS.find((t) => t === raw) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTestText(text: TestText | null): void {
+  try {
+    if (text) localStorage.setItem(TEST_TEXT_KEY, text);
+    else localStorage.removeItem(TEST_TEXT_KEY);
+  } catch {
+    // Nowhere to keep it; saved captures will ask for their text instead.
+  }
+}

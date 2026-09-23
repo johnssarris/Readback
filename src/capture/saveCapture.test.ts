@@ -77,6 +77,11 @@ describe("sidecar", () => {
     expect(meta.diagnostics.track).toEqual({ width: 1932, height: 2576, frameRate: 30 });
   });
 
+  it("names the test text when one was chosen, and asks for it when not", () => {
+    expect((JSON.parse(sidecar(record({ testText: "screen-test.txt" }), "x")) as FixtureMeta).text).toBe("screen-test.txt");
+    expect((JSON.parse(sidecar(record(), "x")) as FixtureMeta).text).toBe("REPLACE-ME.txt");
+  });
+
   it("says when the corners were placed by hand", () => {
     const meta = JSON.parse(sidecar(record({ fromMarkers: false }), "x")) as { diagnostics: any };
     expect(meta.diagnostics.cornersFrom).toBe("hand");

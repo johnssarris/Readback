@@ -1,7 +1,7 @@
 import { APP_VERSION, BUILD_DATE } from "../version";
 import type { MarkerReport } from "../pipeline/markers";
 import type { PaneAspect, Point } from "../pipeline/rectify";
-import type { ScreenProfile } from "../settings";
+import type { ScreenProfile, TestText } from "../settings";
 import { buildZip } from "./zip";
 
 /**
@@ -35,6 +35,8 @@ export interface CaptureRecord {
   aspect?: PaneAspect | null;
   /** The screen profile as given on the start screen, when it was: the pane's size, and its grid if that was given too. */
   screen?: ScreenProfile | null;
+  /** The test text that was open, as chosen on the start screen, when it was one. */
+  testText?: TestText | null;
 }
 
 /**
@@ -66,7 +68,9 @@ export function sidecar(record: CaptureRecord, name: string): string {
   return `${JSON.stringify(
     {
       kind: "photo",
-      text: "REPLACE-ME.txt",
+      // Named when a test text was chosen, so the capture is scored as it is
+      // dropped in; the file is taken from the top unless `lines` is added.
+      text: record.testText ?? "REPLACE-ME.txt",
       note: `Saved from Readback ${APP_VERSION} (${BUILD_DATE}) as ${name}`,
       // Kept even when the markers found them: they are what this capture was
       // actually read with, and a fixture that re-detects them should agree.

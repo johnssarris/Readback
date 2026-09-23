@@ -17,6 +17,12 @@ export interface FixtureMeta {
   kind: "render" | "screenshot" | "photo";
   /** Ground-truth text file, relative to the fixtures directory. */
   text: string;
+  /**
+   * The lines of `text` the screen showed, first and last, counting from 1,
+   * when it was not scrolled to the top: what the overlay's label says. Without
+   * it the file is taken from its first line.
+   */
+  lines?: [number, number];
   note?: string;
   /**
    * Window corners in image pixels (TL, TR, BR, BL). Optional: with corner
@@ -118,14 +124,28 @@ function loadFixture(file: string): Fixture {
   if (!image) {
     throw new Error(`Fixture ${name}.json has no ${name}${IMAGE_EXTENSIONS.join("/")} beside it`);
   }
-  const text = readFileSync(join(FIXTURE_DIR, meta.text), "utf8").replace(/\n$/, "");
-
-  // Only what the window actually shows can be recognized from it, so a
-  // source file longer than the screenful is truncated to what is on screen
-  // rather than charged as errors.
-  const all = text.split("\n");
-  const lines = all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
+  const lines = visibleLines(readFileSync(join(FIXTURE_DIR, meta.text), "utf8"), meta);
   return { name, meta, image: loadImage(image), lines, rows: meta.truth?.displayRows ?? lines };
+}
+
+/**
+ * The lines of a fixture's text the window actually showed.
+ *
+ * Only what is on screen can be recognized, so a source file longer than the
+ * screenful is cut to what was showing rather than charged as errors: from
+ * the sidecar's `lines` when it gives them, and otherwise from the top, as far
+ * as the recorded truth says the window reached.
+ */
+export function visibleLines(text: string, meta: Pick<FixtureMeta, "lines" | "truth">): string[] {
+  let all = text.replace(/\n$/, "").split("\n");
+  if (meta.lines) {
+    const [first, last] = meta.lines;
+    if (!(Number.isInteger(first) && Number.isInteger(last) && first >= 1 && last >= first)) {
+      throw new Error(`lines must be [first, last] counting from 1, not ${JSON.stringify(meta.lines)}`);
+    }
+    all = all.slice(first - 1, last);
+  }
+  return all.slice(0, meta.truth?.lineCount ?? meta.truth?.rowCount ?? all.length);
 }
 
 function toPoint(p: Point | [number, number]): Point {

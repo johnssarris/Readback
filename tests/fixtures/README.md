@@ -42,10 +42,13 @@ the text's font, and its advance width is not the text's.
 ## Adding one from the app
 
 The app's **Save** button, in the adjust step after freezing, writes one zip
-holding a `.jpg` and a `.json` under the same timestamped name. Unzip it here,
-put the text the window was showing beside it, and point the sidecar's `text`
-at that file — it is written as `REPLACE-ME.txt`, since only the person who
-took the shot knows what was on the screen. Everything else is filled in: the
+holding a `.jpg` and a `.json` under the same timestamped name. Unzip it here. If
+"Text on screen" was set on the start screen, the sidecar already names the
+text (`screen-test.txt`, see `tools/README.md`); otherwise it says
+`REPLACE-ME.txt`, and the text the window showed has to be put beside it and
+named. A text file longer than the screen is cut to what was on it: from the
+top, or from `"lines": [first, last]` (counting from 1) when the sidecar gives
+them. Everything else is filled in: the
 corners the capture was actually read at, the pane's size when it was given on
 the start screen (which the capture measurements need), the grid as
 `profile` when the whole profile line was given, and a `diagnostics`
