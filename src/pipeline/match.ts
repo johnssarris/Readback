@@ -167,9 +167,115 @@ function centreContrast(cell: Float32Array, width: number, height: number): numb
 }
 
 /**
+ * Where across its own cell a glyph is looked for, as shares of the cell's width.
+ *
+ * A grid laid over a photograph puts each cell within a fraction of a cell of
+ * where its glyph really is, not on it: the pitch is measured to a fraction of
+ * a percent, but that fraction adds up along a line, and a lens and a screen
+ * that is not quite flat move each stretch of a line a little further. A
+ * template compared off-centre scores lower than a wrong template that happens
+ * to share the offset, so a misplaced cell reads as the wrong character with
+ * every sign of confidence. Looking a few places either side and keeping each
+ * template's best finds the glyph where it is. Measured over the photos taken
+ * against a screen profile, it takes the share of cells read wrong from about
+ * half to about a quarter; searching less far gives some of that back.
+ */
+const SHIFTS = [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3];
+
+/**
+ * What a match gives up per cell width it had to move, in correlation.
+ *
+ * Moved far enough, a cell takes in part of its neighbour, and a narrow
+ * template can find a stroke of the neighbour's glyph there - on clean text,
+ * where every cell is already in place, that is the only thing the search can
+ * find. Charging for the move keeps a glyph where the grid put it unless it
+ * fits clearly better elsewhere. Measured over the fixtures, this figure keeps
+ * the renders within a point or two of reading with no search at all, where
+ * without it some lost ten, and costs the photographs about one point of what
+ * the search gains them.
+ */
+const SHIFT_COST = 0.4;
+
+/**
+ * The templates as the search compares them: at half size, which costs the
+ * search nothing measurable in accuracy and a quarter of the work, and with
+ * their mean taken out and scaled to unit length, so a correlation is one dot
+ * product. A flat template - the space - has no shape to correlate with and is
+ * left all zeros.
+ */
+interface SearchTemplates {
+  width: number;
+  height: number;
+  glyphs: Array<[string, Float32Array]>;
+}
+
+const searchTemplates = new WeakMap<GlyphAtlas, SearchTemplates>();
+
+function templatesFor(atlas: GlyphAtlas): SearchTemplates {
+  let found = searchTemplates.get(atlas);
+  if (!found) {
+    const width = Math.max(1, Math.floor(atlas.cellWidth / 2));
+    const height = Math.max(1, Math.floor(atlas.cellHeight / 2));
+    const glyphs: Array<[string, Float32Array]> = [];
+    for (const [char, glyph] of atlas.glyphs) {
+      glyphs.push([char, unitize(halve(glyph, atlas.cellWidth, atlas.cellHeight, width, height))]);
+    }
+    found = { width, height, glyphs };
+    searchTemplates.set(atlas, found);
+  }
+  return found;
+}
+
+/** Each pixel of the half-size image is the mean of the two-by-two block it covers. */
+function halve(full: Float32Array, fullWidth: number, fullHeight: number, width: number, height: number): Float32Array {
+  const out = new Float32Array(width * height);
+  const sx = fullWidth / width;
+  const sy = fullHeight / height;
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.floor(y * sy);
+    const y1 = Math.min(fullHeight - 1, y0 + 1);
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.floor(x * sx);
+      const x1 = Math.min(fullWidth - 1, x0 + 1);
+      out[y * width + x] =
+        (full[y0 * fullWidth + x0] +
+          full[y0 * fullWidth + x1] +
+          full[y1 * fullWidth + x0] +
+          full[y1 * fullWidth + x1]) /
+        4;
+    }
+  }
+  return out;
+}
+
+/** Mean taken out and scaled to unit length, in place; a flat buffer comes back all zeros. */
+function unitize(values: Float32Array): Float32Array {
+  let mean = 0;
+  for (let i = 0; i < values.length; i++) mean += values[i];
+  mean /= values.length;
+  let length = 0;
+  for (let i = 0; i < values.length; i++) {
+    values[i] -= mean;
+    length += values[i] * values[i];
+  }
+  length = Math.sqrt(length);
+  const scale = length < 1e-6 ? 0 : 1 / length;
+  for (let i = 0; i < values.length; i++) values[i] *= scale;
+  return values;
+}
+
+function dot(a: Float32Array, b: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+}
+
+/**
  * Crops+resamples the given cell rect to the atlas's canonical size, then matches it against
  * every glyph via NCC (Stage 5), and applies the confidence-floor/ambiguity-margin flagging
  * rules (Stage 6) so a cell is never silently force-matched to a weak or ambiguous candidate.
+ *
+ * Each glyph is scored at its best place across the cell; see SHIFTS.
  */
 export function matchCell(image: ImageData, cellRect: Rect, atlas: GlyphAtlas): MatchResult {
   const resampled = resampleToGray(image, cellRect, atlas.cellWidth, atlas.cellHeight);
@@ -178,11 +284,17 @@ export function matchCell(image: ImageData, cellRect: Rect, atlas: GlyphAtlas): 
     return { char: " ", confidence: 1, candidates: [{ char: " ", score: 1 }], flagged: false };
   }
 
-  const scores: MatchCandidate[] = [];
-  for (const [char, glyph] of atlas.glyphs) {
-    const raw = normalizedCrossCorrelation(resampled, glyph);
-    scores.push({ char, score: (raw + 1) / 2 });
+  const templates = templatesFor(atlas);
+  const raw = new Float32Array(templates.glyphs.length).fill(-1);
+  for (const shift of SHIFTS) {
+    const moved = { ...cellRect, x: cellRect.x + shift * cellRect.w };
+    const sample = unitize(resampleToGray(image, moved, templates.width, templates.height));
+    templates.glyphs.forEach(([, glyph], i) => {
+      raw[i] = Math.max(raw[i], dot(sample, glyph) - SHIFT_COST * Math.abs(shift));
+    });
   }
+
+  const scores: MatchCandidate[] = templates.glyphs.map(([char], i) => ({ char, score: (raw[i] + 1) / 2 }));
   scores.sort((a, b) => b.score - a.score);
 
   const best = scores[0];

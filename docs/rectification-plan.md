@@ -310,6 +310,28 @@ Each step names the number that should move.
    down as well to 17%. So about two thirds of what is wrong is the grid not
    sitting on the text - geometry - and what recognition itself gets wrong is
    the remaining sixth or so.
+   The obvious fix - lay the columns where the text is, per column or per
+   stretch of a line - did not work, and was dropped. Registered against the
+   matcher's own reads, the grid confirms itself: a cell a fifth off still
+   reads as something, most confidently where it already sits, so the fitted
+   shifts came out near zero. Registered against the gaps between glyphs,
+   it followed the text's content rather than its position. Measured drift
+   between one column band and the next was small except at the far right,
+   so most of the misregistration is cell by cell, not a slow slide.
+   So the matcher now looks for each glyph at seven places across its cell,
+   up to 0.3 of a cell either way. It compares at half the template size,
+   which costs nothing in accuracy, and charges 0.4 of a correlation per cell
+   width moved, so clean text stays where the grid put it (`SHIFTS` and
+   `SHIFT_COST` in `match.ts`). Over the eleven profiled laptop shots:
+   wrong character cells fell from 49% to 23% of letters, 54% to 26% of
+   digits and 63% to 33% of punctuation. By thirds of the line, left to
+   right, they went from 43/56/64% to 14/32/35%. CER went from 41-89% to
+   24-71%. The older photos moved the same way (photo-far, -mid and -near:
+   29/37/49% to 5/13/23%). The renders stay within half a point of before,
+   except the wrapped one under the camera simulation (4.9% to 6.9%). A full
+   metrics run takes no longer.
+   Errors still rise from the left third to the right, and blank cells read
+   as ink 10% of the time, so step 4 still stands.
 4. **Remove the bow.** Measure the four pane boundaries as curves in each shot
    (top and bottom against the chrome; left from the gutter-to-text boundary
    offset by the known margin width; right against the scrollbar) and warp
