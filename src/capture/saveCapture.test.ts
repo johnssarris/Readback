@@ -82,6 +82,13 @@ describe("sidecar", () => {
     expect((JSON.parse(sidecar(record(), "x")) as FixtureMeta).text).toBe("REPLACE-ME.txt");
   });
 
+  it("carries what was read, when it was kept after reading", () => {
+    const read = { text: "hello", summary: ["grid: from the screen profile"] };
+    const meta = JSON.parse(sidecar(record({ read }), "x")) as { diagnostics: any };
+    expect(meta.diagnostics.read).toEqual(read);
+    expect(JSON.parse(sidecar(record(), "x")).diagnostics).not.toHaveProperty("read");
+  });
+
   it("says when the corners were placed by hand", () => {
     const meta = JSON.parse(sidecar(record({ fromMarkers: false }), "x")) as { diagnostics: any };
     expect(meta.diagnostics.cornersFrom).toBe("hand");

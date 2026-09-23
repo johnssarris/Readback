@@ -41,8 +41,12 @@ the text's font, and its advance width is not the text's.
 
 ## Adding one from the app
 
-The app's **Save** button, in the adjust step after freezing, writes one zip
-holding a `.jpg` and a `.json` under the same timestamped name. Unzip it here. If
+The app's **Keep** button, in the adjust step after freezing or on the result
+screen, keeps the shot on the phone; **Send n**, on the live screen, then sends
+every shot kept that session as one zip, a `.jpg` and a `.json` per shot under
+the shot's timestamped name. A shot kept from the result screen also carries
+what the app read from it, under `diagnostics.read`. Kept shots survive the app
+being closed, and stay kept if the share sheet is dismissed. Unzip it here. If
 "Text on screen" was set on the start screen, the sidecar already names the
 text (`screen-test.txt`, see `tools/README.md`); otherwise it says
 `REPLACE-ME.txt`, and the text the window showed has to be put beside it and

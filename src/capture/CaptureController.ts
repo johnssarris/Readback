@@ -9,7 +9,8 @@ import {
 import { loadPaneSize, loadScreenProfile, loadTestText } from "../settings";
 import { VERSION_LABEL } from "../version";
 import { inspectMarkers, type MarkerReport } from "../pipeline/markers";
-import { saveCapture } from "./saveCapture";
+import { encodeCapture, sendCaptures } from "./saveCapture";
+import { openCaptureQueue } from "./captureQueue";
 import type { Framing } from "../pipeline/margins";
 import { analyzeCapture, prepareCapture, type KnownGrid } from "../pipeline/analyze";
 import { loadAtlasAssets } from "../pipeline/atlasLoader";
@@ -61,7 +62,17 @@ export class CaptureController {
   private freezeBtn: HTMLButtonElement;
   private readBtn: HTMLButtonElement;
   private retakeBtn: HTMLButtonElement;
-  private saveBtn: HTMLButtonElement;
+  private keepBtn: HTMLButtonElement;
+  private sendBtn: HTMLButtonElement;
+
+  /** This session's kept captures; see captureQueue.ts. */
+  private queue = openCaptureQueue();
+
+  /** When the frame was frozen, which names it; see encodeCapture. */
+  private frozenAt = new Date();
+
+  /** What the camera was doing when the frame was frozen - the stream is gone by the result screen. */
+  private track: MediaTrackSettings | null = null;
   private resultView: HTMLDivElement | null = null;
 
   private phase: Phase = "live";
@@ -132,11 +143,13 @@ export class CaptureController {
     this.freezeBtn = button("Freeze", "shutter-btn", () => this.freeze());
     this.readBtn = button("Read", "shutter-btn", () => this.read());
     this.retakeBtn = button("Retake", "shutter-btn secondary", () => this.retake());
-    this.saveBtn = button("Save", "shutter-btn secondary", () => this.save());
+    this.keepBtn = button("Keep", "shutter-btn secondary", () => void this.keep(null, this.keepBtn));
+    this.sendBtn = button("Send", "shutter-btn secondary", () => void this.send());
+    this.sendBtn.hidden = true;
 
     const controls = document.createElement("div");
     controls.className = "capture-controls";
-    controls.append(this.freezeBtn, this.retakeBtn, this.saveBtn, this.readBtn);
+    controls.append(this.sendBtn, this.freezeBtn, this.retakeBtn, this.keepBtn, this.readBtn);
 
     this.stage.append(this.video, this.frame, this.overlay, this.loupe);
     this.root.append(this.hint, this.stage, controls);
@@ -177,7 +190,10 @@ export class CaptureController {
     this.freezeBtn.hidden = adjusting;
     this.readBtn.hidden = !adjusting;
     this.retakeBtn.hidden = !adjusting;
-    this.saveBtn.hidden = !adjusting;
+    this.keepBtn.hidden = !adjusting;
+    this.keepBtn.textContent = "Keep";
+    this.keepBtn.disabled = false;
+    void this.showKept();
     this.loupe.hidden = true;
 
     if (!adjusting) {
@@ -247,8 +263,12 @@ export class CaptureController {
     const ctx = this.frame.getContext("2d", { willReadFrequently: true })!;
     ctx.drawImage(this.video, 0, 0);
 
+    this.frozenAt = new Date();
+    this.track = this.stream?.getVideoTracks()[0]?.getSettings() ?? null;
+
     this.video.hidden = true;
     this.frame.hidden = false;
+    this.sendBtn.hidden = true;
     this.freezeBtn.disabled = true;
     this.hint.textContent = "Looking for the corner markers…";
     await nextPaint();
@@ -283,38 +303,77 @@ export class CaptureController {
   }
 
   /**
-   * Saves the frozen frame and everything known about it, as a fixture.
+   * Keeps the frozen frame and everything known about it, as a fixture, to
+   * leave with the rest of the session's when they are sent.
    *
    * The capture that goes wrong is the one nobody can reproduce: it happened on
    * a phone, against a screen, in a room none of the test images came from. So
    * the frame leaves with the corners it was read at and the detector's account
    * of it, in the layout tests/fixtures uses, ready to become a permanent case.
+   * Kept from the result screen, it also carries what was read from it.
    */
-  private save(): void {
-    if (this.phase !== "adjust" || !this.report) return;
+  private async keep(read: { text: string; summary: string[] } | null, btn: HTMLButtonElement): Promise<void> {
+    if (!this.report) return;
 
-    const label = this.saveBtn.textContent;
-    this.saveBtn.disabled = true;
-    this.saveBtn.textContent = "Saving…";
-
+    btn.disabled = true;
+    btn.textContent = "Keeping…";
     const quad = normalizeQuad(CORNER_ORDER.map((c) => this.points[c]));
-    saveCapture({
-      frame: this.frame,
-      corners: this.points,
-      aspect: quad ? this.paneAspect(quad) : null,
-      fromMarkers: this.fromMarkers,
-      report: this.report,
-      track: this.stream?.getVideoTracks()[0]?.getSettings() ?? null,
-      screen: loadScreenProfile(),
-      testText: loadTestText(),
-    })
-      .catch((error) => {
-        this.hint.textContent = `Could not save: ${error instanceof Error ? error.message : String(error)}`;
-      })
-      .finally(() => {
-        this.saveBtn.disabled = false;
-        this.saveBtn.textContent = label;
-      });
+    try {
+      const capture = await encodeCapture(
+        {
+          frame: this.frame,
+          corners: this.points,
+          aspect: quad ? this.paneAspect(quad) : null,
+          fromMarkers: this.fromMarkers,
+          report: this.report,
+          track: this.track,
+          screen: loadScreenProfile(),
+          testText: loadTestText(),
+          read,
+        },
+        this.frozenAt
+      );
+      const queue = await this.queue;
+      const count = await queue.add(capture);
+      btn.textContent = `Kept (${count})`;
+      if (this.phase === "adjust" && btn === this.keepBtn) {
+        this.hint.textContent =
+          `Kept: ${count} this session${queue.persistent ? "" : ", until the app is closed"}. ` +
+          "Retake for the next, or read this one.";
+      }
+    } catch (error) {
+      btn.disabled = false;
+      btn.textContent = "Keep";
+      this.hint.textContent = `Could not keep: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  /** On the live screen, a button to send whatever this session has kept. */
+  private async showKept(): Promise<void> {
+    const count = await (await this.queue).count();
+    this.sendBtn.textContent = `Send ${count}`;
+    this.sendBtn.hidden = this.phase !== "live" || count === 0;
+  }
+
+  /**
+   * Sends every kept capture as one zip, and lets them go once it has left:
+   * a share sheet dismissed without sending keeps them for next time.
+   */
+  private async send(): Promise<void> {
+    const queue = await this.queue;
+    const kept = await queue.list();
+    if (kept.length === 0) return;
+
+    this.sendBtn.disabled = true;
+    this.sendBtn.textContent = "Sending…";
+    try {
+      if ((await sendCaptures(kept)) === "sent") await queue.clear();
+    } catch (error) {
+      this.hint.textContent = `Could not send: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.sendBtn.disabled = false;
+      await this.showKept();
+    }
   }
 
   /**
@@ -493,8 +552,15 @@ export class CaptureController {
     recognized.textContent = "Loading glyph atlas…";
 
     const retakeBtn = button("Retake", "retake-btn", () => this.restart());
+    // Kept from here once the read is done, so the sidecar says what was read.
+    let read: { text: string; summary: string[] } | null = null;
+    const keepBtn = button("Keep", "retake-btn secondary", () => void this.keep(read, keepBtn));
+    keepBtn.disabled = true;
 
-    this.resultView.append(stack, info, recognized, retakeBtn);
+    const actions = document.createElement("div");
+    actions.className = "result-actions";
+    actions.append(keepBtn, retakeBtn);
+    this.resultView.append(stack, info, recognized, actions);
     this.root.innerHTML = "";
     this.root.appendChild(this.resultView);
 
@@ -502,6 +568,8 @@ export class CaptureController {
     const analysis = analyzeCapture(rectified, framing, atlas, known);
 
     info.textContent = [note, ...analysis.summary].join("\n");
+    read = { text: analysis.rows ? rowsToText(analysis.rows) : "", summary: [note, ...analysis.summary] };
+    keepBtn.disabled = false;
     if (analysis.margins) {
       drawDebugOverlay(overlay.getContext("2d")!, rectified, analysis.margins, analysis.pitch);
     }

@@ -250,7 +250,7 @@ Each step names the number that should move.
    does not predict CER (1.3 px and 75%, 1.9 px and 30%), but wander does -
    every capture with wander 0.44 or more is at 75-99% CER, every one at 0.30
    or less is at 28-57%. The grid is what fails first.
-2. **Resolution.** Ask `getUserMedia` for 4K, and confirm with Save what the
+2. **Resolution.** Ask `getUserMedia` for 4K, and confirm with a kept capture what the
    phone actually delivers. The biggest single lever, and upstream of
    everything else. Moves: camera px per screen px, blur, CER.
    In the app: it asks for 3840 x 2160, shows after freezing the frame it got
