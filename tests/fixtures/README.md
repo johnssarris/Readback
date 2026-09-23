@@ -156,6 +156,15 @@ out, keeping the sizes, to measure the estimator on the same fixtures; the
 `grid` column says which one read each row, and a line under a row says why a
 profile was set aside.
 
+A photo taken at a display scaling other than 100% says so as `"scaling":
+1.5` (for 150%), read off the label: the markers are drawn that much larger,
+and the capture measurements need to know where their edges are.
+
+With `profile` and `paneSize`, a photo's text is laid out in rows the way the
+editor wraps it - at word boundaries, at as many columns as the pane holds -
+so the row count, ink, indent and line number columns compare like with like
+on a pane too narrow for its lines.
+
 ## Capture measurements
 
 For a photo whose markers are found and whose sidecar gives `paneSize`, the

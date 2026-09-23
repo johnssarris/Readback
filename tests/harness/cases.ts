@@ -50,6 +50,12 @@ export interface FixtureMeta {
    */
   paneSize?: { width: number; height: number };
   /**
+   * Windows' display scaling on the pane's monitor, as a multiple (1.5 for
+   * 150%), which the markers are drawn at. From the overlay's label; 1 when
+   * not given.
+   */
+  scaling?: number;
+  /**
    * The grid as overlay.py printed it beside the pane's size, in screen pixels
    * from the pane's corner. Only what was actually printed on the machine: a
    * guessed one would make the metrics measure the guess.
@@ -86,6 +92,8 @@ export interface Fixture {
   lines: string[];
   /** Ground truth per displayed row. Same as `lines` unless the window wrapped them. */
   rows: string[];
+  /** The line number beside each displayed row, null on a wrapped continuation; null when not known. */
+  rowNumbers: (number | null)[] | null;
 }
 
 /** The image formats a fixture can be stored in; see `loadImage`. */
@@ -125,7 +133,44 @@ function loadFixture(file: string): Fixture {
     throw new Error(`Fixture ${name}.json has no ${name}${IMAGE_EXTENSIONS.join("/")} beside it`);
   }
   const lines = visibleLines(readFileSync(join(FIXTURE_DIR, meta.text), "utf8"), meta);
-  return { name, meta, image: loadImage(image), lines, rows: meta.truth?.displayRows ?? lines };
+  if (meta.truth) {
+    const rows = meta.truth.displayRows ?? lines;
+    return { name, meta, image: loadImage(image), lines, rows, rowNumbers: meta.truth.rowNumbers ?? null };
+  }
+  // A photo's rows are its lines as the editor wrapped them, which the
+  // profile says enough to repeat: how many columns the pane holds.
+  const wrapped =
+    meta.profile && meta.paneSize
+      ? wrapRows(lines, Math.floor((meta.paneSize.width - meta.profile.textLeft) / meta.profile.advance), meta.lines?.[0] ?? 1)
+      : null;
+  return { name, meta, image: loadImage(image), lines, rows: wrapped?.rows ?? lines, rowNumbers: wrapped?.rowNumbers ?? null };
+}
+
+/**
+ * Lines laid out in rows the way the editor wraps them at word boundaries: a
+ * line longer than the pane breaks after the last space that fits, or at the
+ * last column when no space does, and carries on at the start of the next row
+ * with no line number beside it.
+ */
+export function wrapRows(lines: string[], columns: number, firstLine: number): { rows: string[]; rowNumbers: (number | null)[] } {
+  const rows: string[] = [];
+  const rowNumbers: (number | null)[] = [];
+  lines.forEach((line, i) => {
+    let rest = line;
+    let number: number | null = firstLine + i;
+    while (rest.length > columns) {
+      let cut = columns;
+      while (cut > 0 && !(rest[cut - 1] === " " && rest[cut] !== " ")) cut--;
+      if (cut === 0) cut = columns;
+      rows.push(rest.slice(0, cut));
+      rowNumbers.push(number);
+      rest = rest.slice(cut);
+      number = null;
+    }
+    rows.push(rest);
+    rowNumbers.push(number);
+  });
+  return { rows, rowNumbers };
 }
 
 /**

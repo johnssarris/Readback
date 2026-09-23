@@ -1,4 +1,4 @@
-import { findRuns, inkThreshold, luminance, median, otsuThreshold } from "./imageUtils";
+import { findRuns, inkThreshold, luminance, median, otsuThreshold, percentile } from "./imageUtils";
 import type { MarginBounds } from "./margins";
 
 export interface CellPitch {
@@ -206,10 +206,10 @@ function detectRows(image: ImageData, margins: MarginBounds, gutter: GutterAnaly
  *
  * A line number sits beside the first row of its line, so the step from one to
  * the next is one row for a line that fits and more for one the editor wrapped.
- * Taken as a median across the screenful that is the row pitch outright,
- * because wrapping is the exception: it takes more than half the visible lines
- * wrapping for the median step to be anything but a single row, and a screenful
- * like that is one where the window wants making wider.
+ * The row pitch is the shortest step that recurs, not the typical one (see
+ * rowStepOf): the median was, until a laptop at 150% scaling wrapped half the
+ * lines of the test text, took the step between one row and two as the pitch,
+ * and read every line through the middle.
  *
  * This used to be divided by a count of rows per line, folded out of the body's
  * ink and counted as bands. The count had nothing to add - the median already
@@ -221,8 +221,9 @@ function detectRows(image: ImageData, margins: MarginBounds, gutter: GutterAnaly
  * it split read every line twice at half the pitch. Removing it left every
  * fixture's row count right, the wrapped one included.
  *
- * What is given up is a screenful where nearly every line wraps, which no
- * fixture covers. The band count did not reliably rescue that case either.
+ * What is given up is a screenful where nearly every line wraps - more than
+ * three in four - which no fixture covers. The band count did not reliably
+ * rescue that case either.
  */
 function rowPitch(profile: number[], lineSpacing: number): number {
   const coarse = lineSpacing;
@@ -309,6 +310,29 @@ function withInk(centers: number[], profile: number[], y0: number, pitch: number
   while (last >= first && inks[last] < floor) last--;
   return centers.slice(first, last + 1);
 }
+
+/**
+ * The row pitch from the line numbers: the shortest step between consecutive
+ * ones that recurs.
+ *
+ * Every line takes at least one row, so the steps are the pitch and multiples
+ * of it. The lowest quarter of them is taken as where the one-row steps are,
+ * and the pitch is the median of the steps near it - within ONE_ROW of the
+ * lower quartile, which a two-row step never is. That holds until more than
+ * three lines in four wrap; a median of all the steps held only until half did.
+ */
+function rowStepOf(bands: Array<{ start: number; end: number }>): number {
+  const steps: number[] = [];
+  for (let i = 1; i < bands.length; i++) {
+    steps.push((bands[i].start + bands[i].end) / 2 - (bands[i - 1].start + bands[i - 1].end) / 2);
+  }
+  if (steps.length === 0) return NaN;
+  const low = percentile(steps, 0.25);
+  return median(steps.filter((step) => step <= low * ONE_ROW));
+}
+
+/** How far above the lower quartile a step can be and still be one row; two rows is twice it. */
+const ONE_ROW = 1.25;
 
 /** Median gap between the centers of consecutive bands. */
 function spacingOf(bands: Array<{ start: number; end: number }>): number {
@@ -583,7 +607,7 @@ function analyzeGutter(image: ImageData, margins: MarginBounds): GutterAnalysis 
   // of them were too small to have been a number in the first place.
   const rowRuns = filterShortBands(bands, spacingOf(bands));
   const rowYCenters = rowRuns.map((r) => bodyTopY + (r.start + r.end) / 2);
-  const cellHeightPx = spacingOf(rowRuns);
+  const cellHeightPx = rowStepOf(rowRuns);
   const digitRuns = rowRuns.map((r) => ({ start: bodyTopY + r.start, end: bodyTopY + r.end }));
 
   return { rowYCenters, cellHeightPx, digitRuns };

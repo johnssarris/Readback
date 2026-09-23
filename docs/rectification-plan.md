@@ -261,6 +261,11 @@ Each step names the number that should move.
    to do on the phone: see what Safari grants, and whether the density and
    CER move. If it stops at 1080p, the next thing to try is the native camera
    through a file input, which hands over a full-resolution still.
+   On the phone (captures 112129-112312): Safari grants 4K, 2160 x 3840. On a
+   laptop pane at 150% scaling that is 1.54-1.69 camera px per screen px,
+   against 0.77-0.97 at 1080p. Marker detection held - all four found in every
+   shot - but takes 2.2-4.3 s on the phone; detecting at half resolution and
+   refining the corners at full is the obvious next step.
 3. **Screen profile and 2x output.** Done, with two changes from the plan.
    `overlay.py` prints `profile: 985 x 563, cell 10.750 x 23, text at 42`
    from integer-only Scintilla messages, or the size alone and the reason when
@@ -284,6 +289,13 @@ Each step names the number that should move.
    the steadiest captures better (24.5% against 28.8%). Using the known
    aspect alone took the photos from 47.7% to 41.4%. Next: print the real
    profile on the machine, add it to the photo sidecars, and re-measure.
+   First real profile (captures 112129-112312, laptop, 150%): the profile
+   path lays the grid out right - 20 of 20 rows, every line number read,
+   89-93% of cells right as ink or blank - where the estimator, even with the
+   row pitch fixed, takes the column width a third out. CER is still 60-89%,
+   and the recognized text shows why: it is right at the left and top and
+   drifts off toward the right and bottom, where these shots bow by up to
+   5 px. That is step 4's to fix, and it is next.
 4. **Remove the bow.** Measure the four pane boundaries as curves in each shot
    (top and bottom against the chrome; left from the gutter-to-text boundary
    offset by the known margin width; right against the scrollbar) and warp
